@@ -35,7 +35,8 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run generate
       - run: bun run prisma:validate
-      - run: bun x --cwd server prisma migrate deploy
+      - run: bun x prisma migrate deploy
+        working-directory: server
       - run: bun run prisma:migrate:status
       - run: bun run lint
       - run: bun run typecheck
