@@ -6,10 +6,11 @@ import {
     listArtifacts,
 } from "../controllers/artifact.controller.js";
 import { asyncHandler } from "../utils/async-handler.js";
+import { generationRateLimit } from "../middleware/rate-limit.middleware.js";
 
 export const artifactRoutes = Router({ mergeParams: true });
 
 artifactRoutes.get("/", asyncHandler(listArtifacts));
-artifactRoutes.post("/", asyncHandler(createArtifact));
+artifactRoutes.post("/", generationRateLimit, asyncHandler(createArtifact));
 artifactRoutes.get("/:artifactId", asyncHandler(getArtifact));
 artifactRoutes.delete("/:artifactId", asyncHandler(deleteArtifact));

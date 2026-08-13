@@ -1,6 +1,7 @@
 
 import { v2 as cloudinary } from "cloudinary";
 import { ValidationError } from "../types/app-error.js";
+import { z } from "zod";
 
 const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
 const uploadPreset = process.env.CLOUDINARY_UPLOAD_PRESET ?? "dt2jgaj48";
@@ -16,13 +17,13 @@ export type CloudinaryUploadResult = {
     resourceType: "raw" | "image";
 };
 
-type CloudinaryUploadResponse = {
-    secure_url: string;
-    public_id: string;
-    bytes: number;
-    resource_type?: string;
-    error?: { message: string };
-};
+const cloudinaryUploadResponseSchema = z.object({
+    secure_url: z.string().optional(),
+    public_id: z.string().optional(),
+    bytes: z.number().optional(),
+    resource_type: z.string().optional(),
+    error: z.object({ message: z.string() }).optional(),
+});
 
 export function getSignedCloudinaryDownloadUrl(
     publicId: string,
@@ -78,7 +79,8 @@ export async function uploadPdfToCloudinary(
         { method: "POST", body: form },
     );
 
-    const result = (await response.json()) as CloudinaryUploadResponse;
+    const value: unknown = await response.json();
+    const result = cloudinaryUploadResponseSchema.parse(value);
 
     if (!response.ok) {
         const message =
@@ -92,6 +94,10 @@ export async function uploadPdfToCloudinary(
         }
 
         throw new ValidationError(message);
+    }
+
+    if (!result.secure_url || !result.public_id || result.bytes === undefined) {
+        throw new ValidationError("Cloudinary returned an invalid upload response");
     }
 
     return {

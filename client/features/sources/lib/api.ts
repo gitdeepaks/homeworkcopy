@@ -1,4 +1,5 @@
-import { ApiError, apiFetch } from "@/shared/lib/api";
+import { ApiError, apiFetch, apiFetchVoid, authenticatedFetch } from "@/shared/lib/api";
+import { apiErrorResponseSchema } from "@homeworkcopy/contracts";
 import type {
     CreateSourceInput,
     ImportWebsiteInput,
@@ -88,7 +89,7 @@ export async function uploadPdfSource(
         formData.append("title", title.trim());
     }
 
-    const response = await fetch(
+    const response = await authenticatedFetch(
         `/api/workspaces/${workspaceId}/sources/upload`,
         {
             method: "POST",
@@ -100,25 +101,22 @@ export async function uploadPdfSource(
     const data = await response.json().catch(() => null);
 
     if (!response.ok) {
-        throw new ApiError(
-            response.status,
-            (data as { error?: string } | null)?.error ?? "Upload failed",
-            (data as { details?: unknown } | null)?.details,
-        );
+        const parsed = apiErrorResponseSchema.safeParse(data);
+        throw new ApiError(response.status, parsed.success ? parsed.data.error.message : "Upload failed", parsed.success ? parsed.data.error.details : undefined);
     }
 
-    return data as Source;
+    return data;
 }
 
 export function deleteSource(workspaceId: string, sourceId: string) {
-    return apiFetch<void>(
+    return apiFetchVoid(
         `/api/workspaces/${workspaceId}/sources/${sourceId}`,
         { method: "DELETE" },
     );
 }
 
 export function bulkDeleteSources(workspaceId: string, sourceIds: string[]) {
-    return apiFetch<void>(
+    return apiFetchVoid(
         `/api/workspaces/${workspaceId}/sources/bulk-delete`,
         {
             method: "POST",

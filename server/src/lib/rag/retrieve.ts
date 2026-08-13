@@ -8,12 +8,24 @@
 import { RAG_MIN_SCORE, RAG_TOP_K } from "../ai-config.js";
 import { embedTexts } from "../openai.js";
 import { queryWorkspaceVectors } from "../pinecone.js";
+import { sourceTypeSchema, type SourceType } from "@homeworkcopy/contracts";
+import { z } from "zod";
+
+const vectorMetadataSchema = z.object({
+    sourceId: z.string().min(1),
+    sourceTitle: z.string().min(1),
+    sourceType: sourceTypeSchema,
+    chunkId: z.string().min(1),
+    chunkIndex: z.number().int().nonnegative(),
+    page: z.number().int().positive().optional(),
+    text: z.string(),
+});
 
 /** A source chunk returned from Pinecone with similarity score. */
 export type RetrievedChunk = {
     sourceId: string;
     sourceTitle: string;
-    sourceType: string;
+    sourceType: SourceType;
     chunkId: string;
     chunkIndex: number;
     page?: number;
@@ -49,30 +61,21 @@ export async function retrieveWorkspaceContext(
             continue;
         }
 
-        const metadata = match.metadata as
-            | Record<string, unknown>
-            | undefined;
-        if (
-            !metadata ||
-            typeof metadata.sourceId !== "string" ||
-            typeof metadata.sourceTitle !== "string" ||
-            typeof metadata.sourceType !== "string" ||
-            typeof metadata.chunkId !== "string" ||
-            typeof metadata.text !== "string"
-        ) {
+        const metadata = vectorMetadataSchema.safeParse(match.metadata);
+        if (!metadata.success) {
             continue;
         }
 
         chunks.push({
-            sourceId: metadata.sourceId,
-            sourceTitle: metadata.sourceTitle,
-            sourceType: metadata.sourceType,
-            chunkId: metadata.chunkId,
-            chunkIndex: Number(metadata.chunkIndex ?? 0),
-            ...(typeof metadata.page === "number"
-                ? { page: metadata.page }
+            sourceId: metadata.data.sourceId,
+            sourceTitle: metadata.data.sourceTitle,
+            sourceType: metadata.data.sourceType,
+            chunkId: metadata.data.chunkId,
+            chunkIndex: metadata.data.chunkIndex,
+            ...(metadata.data.page !== undefined
+                ? { page: metadata.data.page }
                 : {}),
-            text: metadata.text,
+            text: metadata.data.text,
             score,
         });
     }

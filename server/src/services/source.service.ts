@@ -1,4 +1,4 @@
-import type { Prisma } from "../generated/prisma/client.js";
+import { z } from "zod";
 import { uploadPdfToCloudinary } from "../lib/cloudinary.js";
 import { extractPdfFromBuffer } from "../lib/pdf.js";
 import { scrapeWebsite } from "../lib/firecrawl.js";
@@ -341,18 +341,14 @@ export async function reprocessSourceForWorkspace(
 
     await removeSourceFromIndex(workspaceId, sourceId);
 
-    const metadata =
-        source.metadata &&
-        typeof source.metadata === "object" &&
-        !Array.isArray(source.metadata)
-            ? { ...(source.metadata as Record<string, unknown>) }
-            : {};
+    const parsedMetadata = z.record(z.string(), z.json()).safeParse(source.metadata);
+    const metadata = { ...(parsedMetadata.data ?? {}) };
 
     delete metadata.processingError;
 
     await updateSourceRecord(sourceId, {
         status: "PENDING",
-        metadata: metadata as Prisma.InputJsonValue,
+        metadata,
     });
 
     await enqueueSourceProcessing({ sourceId, workspaceId });

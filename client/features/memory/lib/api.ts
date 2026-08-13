@@ -1,4 +1,4 @@
-import { apiFetch } from "@/shared/lib/api";
+import { apiFetch, apiFetchVoid } from "@/shared/lib/api";
 import type {
     CreateMemoryInput,
     UpdateMemoryInput,
@@ -24,7 +24,7 @@ export function updateMemory(memoryId: string, input: UpdateMemoryInput) {
 }
 
 export function deleteMemory(memoryId: string) {
-    return apiFetch<void>(`/api/memory/${memoryId}`, {
+    return apiFetchVoid(`/api/memory/${memoryId}`, {
         method: "DELETE",
     });
 }

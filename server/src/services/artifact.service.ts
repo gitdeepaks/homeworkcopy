@@ -1,4 +1,4 @@
-import type { Prisma } from "../generated/prisma/client.js";
+import { z } from "zod";
 import { enqueueArtifactGeneration } from "../lib/artifact-events.js";
 import {
     createArtifactRecord,
@@ -170,7 +170,7 @@ export async function processArtifactById(artifactId: string) {
 
         return updateArtifactRecord(artifactId, {
             status: "READY",
-            content: content as Prisma.InputJsonValue,
+            content: z.union([z.string(), z.number(), z.boolean(), z.array(z.json()), z.record(z.string(), z.json())]).parse(content),
             metadata: {
                 generatedAt: new Date().toISOString(),
                 processingError: undefined,

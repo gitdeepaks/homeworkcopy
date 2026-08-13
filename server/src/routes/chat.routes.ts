@@ -7,6 +7,7 @@ import {
     streamChat,
 } from "../controllers/chat.controller.js";
 import { asyncHandler } from "../utils/async-handler.js";
+import { chatRateLimit } from "../middleware/rate-limit.middleware.js";
 
 export const conversationRoutes = Router({ mergeParams: true });
 
@@ -23,4 +24,4 @@ conversationRoutes.delete(
 
 export const chatRoutes = Router({ mergeParams: true });
 
-chatRoutes.post("/", asyncHandler(streamChat));
+chatRoutes.post("/", chatRateLimit, asyncHandler(streamChat));

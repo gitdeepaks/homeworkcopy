@@ -54,7 +54,6 @@ import { addMemoriesFromMessages, searchUserMemories } from "../lib/mem0.js";
 import {
     formatTavilyResultsForPrompt,
     searchWeb,
-    type TavilySearchResponse,
 } from "../lib/tavily.js";
 import { NotFoundError, ValidationError } from "../types/app-error.js";
 import {
@@ -63,6 +62,7 @@ import {
     getTextFromUIMessage,
 } from "../utils/chat-message.js";
 import { getWorkspaceByIdForUser } from "./workspace.service.js";
+import type { SourceCitation, WebCitation } from "@homeworkcopy/contracts";
 
 /**
  * Lists all conversations in a workspace for the sidebar/history UI.
@@ -254,15 +254,17 @@ export async function streamWorkspaceChat(
         searchUserMemories(userId, userText),
     ]);
 
-    const citations = retrievedChunks.map((chunk) => ({
+    const citations: SourceCitation[] = retrievedChunks.map((chunk, index) => ({
+        kind: "source",
+        label: String(index + 1),
         sourceId: chunk.sourceId,
-        sourceTitle: chunk.sourceTitle,
         sourceType: chunk.sourceType,
+        title: chunk.sourceTitle,
+        excerpt: chunk.text.slice(0, 280),
         chunkId: chunk.chunkId,
         chunkIndex: chunk.chunkIndex,
-        page: chunk.page,
-        excerpt: chunk.text.slice(0, 280),
-        score: chunk.score,
+        ...(chunk.page === undefined ? {} : { page: chunk.page }),
+        provenance: { provider: "pinecone", score: chunk.score },
     }));
     const systemPrompt = buildChatSystemPrompt({
         chunks: retrievedChunks,
@@ -277,7 +279,7 @@ export async function streamWorkspaceChat(
             ? input.messages.slice(-RECENT_MESSAGE_WINDOW)
             : input.messages;
 
-    let webSearchResults: TavilySearchResponse | null = null;
+    const webCitations: WebCitation[] = [];
 
     const stream = createUIMessageStream({
         originalMessages: input.messages,
@@ -297,8 +299,24 @@ export async function streamWorkspaceChat(
                               }),
                               execute: async ({ query }) => {
                                   const results = await searchWeb(query);
-                                  webSearchResults = results;
-                                  return formatTavilyResultsForPrompt(results);
+                                  const firstIndex = webCitations.length + 1;
+                                  for (const [index, result] of results.results.entries()) {
+                                      const url = z.url({ protocol: /^https?$/ }).safeParse(result.url);
+                                      if (!url.success) continue;
+                                      webCitations.push({
+                                          kind: "web",
+                                          label: `W${firstIndex + index}`,
+                                          title: result.title,
+                                          url: url.data,
+                                          excerpt: result.content.slice(0, 280),
+                                          provenance: {
+                                              provider: "tavily",
+                                              query: results.query,
+                                              ...(result.score === undefined ? {} : { score: result.score }),
+                                          },
+                                      });
+                                  }
+                                  return formatTavilyResultsForPrompt(results, firstIndex);
                               },
                           }),
                       }
@@ -324,21 +342,13 @@ export async function streamWorkspaceChat(
                 return;
             }
 
-            const webCitations = webSearchResults
-                ? webSearchResults.results.map((result) => ({
-                      sourceType: "WEB" as const,
-                      sourceTitle: result.title,
-                      url: result.url,
-                      excerpt: result.content.slice(0, 280),
-                  }))
-                : [];
             const allCitations = [...citations, ...webCitations];
 
             await createMessageRecord({
                 conversationId: conversation.id,
                 role: "ASSISTANT",
                 content: assistantText,
-                citations: allCitations,
+                citations: { version: 1, items: allCitations },
             });
 
             await touchConversation(conversation.id);

@@ -42,10 +42,7 @@ export function ChatMessageBody({
             }) => {
                 if (web) {
                     const webIndex = Number(web ?? children);
-                    const webCitations = citations.filter(
-                        (citation) => citation.sourceType === "WEB",
-                    );
-                    const citation = webCitations[webIndex - 1];
+                    const citation = citations.find((item) => item.label === `W${webIndex}`);
 
                     if (!citation) {
                         return (
@@ -66,7 +63,7 @@ export function ChatMessageBody({
                 }
 
                 const citationIndex = Number(index ?? children);
-                const citation = getCitationByIndex(citations, citationIndex);
+                const citation = citations.find((item) => item.label === String(citationIndex)) ?? getCitationByIndex(citations, citationIndex);
 
                 if (!citation) {
                     return (

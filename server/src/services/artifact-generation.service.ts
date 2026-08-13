@@ -194,6 +194,6 @@ export async function generateArtifactContent(
             return result.output;
         }
         default:
-            throw new ValidationError(`Unsupported artifact type: ${type}`);
+            throw new ValidationError("Unsupported artifact type");
     }
 }

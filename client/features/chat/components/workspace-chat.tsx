@@ -3,12 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
+import { authenticatedFetch } from "@/shared/lib/api";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
     BotIcon,
     DownloadIcon,
-    GlobeIcon,
     MessageSquarePlusIcon,
     Trash2Icon,
 } from "lucide-react";
@@ -117,8 +117,11 @@ export function WorkspaceChat({
                     model: chatPrefs.model,
                     webSearch: chatPrefs.webSearch,
                 },
-                fetch: async (url, init) => {
-                    const response = await fetch(url, {
+                fetch: Object.assign(async (
+                    url: Parameters<typeof fetch>[0],
+                    init: Parameters<typeof fetch>[1],
+                ) => {
+                    const response = await authenticatedFetch(url, {
                         ...init,
                         credentials: "include",
                     });
@@ -130,7 +133,7 @@ export function WorkspaceChat({
                     }
 
                     return response;
-                },
+                }, { preconnect: fetch.preconnect }),
             }),
         [
             workspaceId,

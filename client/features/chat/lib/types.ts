@@ -1,14 +1,6 @@
-export type ChatCitation = {
-    sourceId?: string;
-    sourceTitle: string;
-    sourceType: string;
-    chunkId?: string;
-    chunkIndex?: number;
-    page?: number;
-    excerpt: string;
-    score?: number;
-    url?: string;
-};
+import type { Citation } from "@homeworkcopy/contracts";
+
+export type ChatCitation = Citation;
 
 export type Conversation = {
     id: string;

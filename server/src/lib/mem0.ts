@@ -1,6 +1,19 @@
 import { MemoryClient } from "mem0ai";
+import { z } from "zod";
+import { withTimeout } from "./timeout.js";
+import { NotFoundError } from "../types/app-error.js";
 
 let client: MemoryClient | null = null;
+const providerMemorySchema = z.object({
+    id: z.string().min(1),
+    memory: z.string().optional(),
+    data: z.object({ memory: z.string() }).nullable().optional(),
+    userId: z.string().min(1).optional(),
+    createdAt: z.union([z.date(), z.string()]).optional(),
+    updatedAt: z.union([z.date(), z.string()]).optional(),
+    metadata: z.record(z.string(), z.unknown()).nullable().optional(),
+    categories: z.array(z.string()).optional(),
+});
 
 /**
  * Returns a singleton Mem0 API client.
@@ -45,14 +58,8 @@ export type AppMemory = {
  * @param record - Raw Mem0 memory object
  * @returns Normalized memory with `source` derived from metadata
  */
-function mapMemory(record: {
-    id: string;
-    memory?: string;
-    createdAt?: Date | string;
-    updatedAt?: Date | string;
-    metadata?: Record<string, unknown> | null;
-    categories?: string[];
-}): AppMemory {
+function mapMemory(value: unknown): AppMemory {
+    const record = providerMemorySchema.parse(value);
     const metadata = record.metadata ?? null;
     const source: AppMemory["source"] =
         metadata?.source === "manual" ? "manual" : "learned";
@@ -61,7 +68,7 @@ function mapMemory(record: {
 
     return {
         id: record.id,
-        memory: record.memory ?? "",
+        memory: record.memory ?? record.data?.memory ?? "",
         createdAt:
             createdAt instanceof Date ? createdAt.toISOString() : createdAt,
         updatedAt:
@@ -70,6 +77,16 @@ function mapMemory(record: {
         categories: record.categories,
         source,
     };
+}
+
+async function assertMemoryOwnership(userId: string, memoryId: string) {
+    const value: unknown = await withTimeout(
+        "Mem0 memory lookup",
+        10_000,
+        getMem0Client().get(memoryId),
+    );
+    const memory = providerMemorySchema.parse(value);
+    if (memory.userId !== userId) throw new NotFoundError("Memory not found");
 }
 
 /**
@@ -84,11 +101,11 @@ export async function listUserMemories(userId: string) {
         return [];
     }
 
-    const page = await getMem0Client().getAll({
+    const page = await withTimeout("Mem0 memory list", 10_000, getMem0Client().getAll({
         filters: { user_id: userId },
         page: 1,
         pageSize: 100,
-    });
+    }));
 
     return page.results.map(mapMemory);
 }
@@ -106,11 +123,11 @@ export async function searchUserMemories(userId: string, query: string) {
         return [];
     }
 
-    const results = await getMem0Client().search(query, {
+    const results = await withTimeout("Mem0 memory search", 10_000, getMem0Client().search(query, {
         filters: { user_id: userId },
         topK: 8,
         threshold: 0.1,
-    });
+    }));
 
     return results.results.map(mapMemory);
 }
@@ -132,14 +149,14 @@ export async function addUserMemory(
         metadata?: Record<string, unknown>;
     },
 ) {
-    const created = await getMem0Client().add(
+    const created = await withTimeout("Mem0 memory create", 15_000, getMem0Client().add(
         [{ role: "user", content: input.memory }],
         {
             userId,
             infer: input.infer ?? false,
             metadata: input.metadata,
         },
-    );
+    ));
 
     const first = created[0];
     if (!first) {
@@ -167,11 +184,11 @@ export async function addMemoriesFromMessages(
         return;
     }
 
-    await getMem0Client().add(messages, {
+    await withTimeout("Mem0 memory extraction", 15_000, getMem0Client().add(messages, {
         userId,
         infer: true,
         metadata,
-    });
+    }));
 }
 
 /**
@@ -184,12 +201,14 @@ export async function addMemoriesFromMessages(
  *
  */
 export async function updateUserMemory(
+    userId: string,
     memoryId: string,
     input: { memory: string },
 ) {
-    const updated = await getMem0Client().update(memoryId, {
+    await assertMemoryOwnership(userId, memoryId);
+    const updated = await withTimeout("Mem0 memory update", 10_000, getMem0Client().update(memoryId, {
         text: input.memory,
-    });
+    }));
 
     const first = updated[0];
     if (!first) {
@@ -206,6 +225,7 @@ export async function updateUserMemory(
  * @returns Resolves when deletion completes
  *
  */
-export async function deleteUserMemory(memoryId: string) {
-    await getMem0Client().delete(memoryId);
+export async function deleteUserMemory(userId: string, memoryId: string) {
+    await assertMemoryOwnership(userId, memoryId);
+    await withTimeout("Mem0 memory delete", 10_000, getMem0Client().delete(memoryId));
 }

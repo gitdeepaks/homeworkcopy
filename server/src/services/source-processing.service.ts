@@ -16,7 +16,7 @@
  */
 
 import type { PineconeRecord } from "@pinecone-database/pinecone";
-import type { Prisma } from "../generated/prisma/client.js";
+import { z } from "zod";
 import { chunkPages, chunkText } from "../lib/chunking.js";
 import { embedTexts } from "../lib/openai.js";
 import { extractPdfFromCloudinary } from "../lib/pdf.js";
@@ -52,6 +52,24 @@ type SourceMetadata = {
     indexedAt?: string;
 };
 
+const sourceMetadataSchema = z.object({
+    fileUrl: z.string().optional(),
+    fileName: z.string().optional(),
+    fileSize: z.number().optional(),
+    publicId: z.string().optional(),
+    resourceType: z.enum(["raw", "image"]).optional(),
+    importedFrom: z.string().optional(),
+    videoId: z.string().optional(),
+    processingError: z.string().optional(),
+    chunkCount: z.number().optional(),
+    pageCount: z.number().optional(),
+    indexedAt: z.string().optional(),
+});
+
+function parseMetadata(value: unknown): SourceMetadata {
+    return sourceMetadataSchema.safeParse(value).data ?? {};
+}
+
 /**
  * Reads extractable text from a source record.
  *
@@ -74,12 +92,7 @@ async function extractSourceText(source: SourceRecord) {
     }
 
     if (source.type === "PDF") {
-        const metadata =
-            source.metadata &&
-            typeof source.metadata === "object" &&
-            !Array.isArray(source.metadata)
-                ? (source.metadata as SourceMetadata)
-                : {};
+        const metadata = parseMetadata(source.metadata);
         if (!metadata.fileUrl) {
             throw new Error("PDF source is missing fileUrl metadata");
         }
@@ -120,12 +133,7 @@ export async function markSourceFailed(
     const message =
         error instanceof Error ? error.message : "Source processing failed";
 
-    const metadata =
-        existingMetadata &&
-        typeof existingMetadata === "object" &&
-        !Array.isArray(existingMetadata)
-            ? (existingMetadata as SourceMetadata)
-            : {};
+    const metadata = parseMetadata(existingMetadata);
 
     return updateSourceRecord(sourceId, {
         status: "FAILED",
@@ -154,12 +162,7 @@ export async function extractSourceContent(sourceId: string) {
     }
 
     const extracted = await extractSourceText(source);
-    const metadata =
-        source.metadata &&
-        typeof source.metadata === "object" &&
-        !Array.isArray(source.metadata)
-            ? (source.metadata as SourceMetadata)
-            : {};
+    const metadata = parseMetadata(source.metadata);
 
     await updateSourceRecord(sourceId, {
         content: extracted.text,
@@ -212,7 +215,7 @@ export async function chunkSourceContent(
             index: chunk.index,
             content: chunk.content,
             tokenCount: Math.ceil(chunk.content.length / 4),
-            metadata: chunk.metadata as Prisma.InputJsonValue | undefined,
+            metadata: chunk.metadata ? z.record(z.string(), z.json()).parse(chunk.metadata) : undefined,
         })),
     );
 }
@@ -246,13 +249,14 @@ export async function embedAndIndexSource(
         const embeddings = await embedTexts(batch.map((chunk) => chunk.content));
 
         for (let j = 0; j < batch.length; j += 1) {
-            const chunk = batch[j]!;
-            const embedding = embeddings[j]!;
+            const chunk = batch[j];
+            const embedding = embeddings[j];
+            if (!chunk || !embedding) continue;
             const chunkMetadata =
                 chunk.metadata &&
                     typeof chunk.metadata === "object" &&
                     !Array.isArray(chunk.metadata)
-                    ? (chunk.metadata as Record<string, unknown>)
+                    ? chunk.metadata
                     : {};
 
             records.push({
@@ -276,12 +280,7 @@ export async function embedAndIndexSource(
 
     await upsertSourceVectors(source.workspaceId, records);
 
-    const metadata =
-        source.metadata &&
-        typeof source.metadata === "object" &&
-        !Array.isArray(source.metadata)
-            ? (source.metadata as SourceMetadata)
-            : {};
+    const metadata = parseMetadata(source.metadata);
 
     return updateSourceRecord(source.id, {
         status: "READY",

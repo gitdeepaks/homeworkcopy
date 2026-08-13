@@ -26,13 +26,9 @@ export type PdfExtractResult = {
 export async function extractPdfFromBuffer(
     buffer: ArrayBuffer | Buffer,
 ): Promise<PdfExtractResult> {
-    const arrayBuffer =
-        buffer instanceof Buffer
-            ? (buffer.buffer.slice(
-                  buffer.byteOffset,
-                  buffer.byteOffset + buffer.byteLength,
-              ) as ArrayBuffer)
-            : buffer;
+    const arrayBuffer = buffer instanceof Buffer
+        ? Uint8Array.from(buffer).buffer
+        : buffer;
 
     const pdf = await getDocumentProxy(new Uint8Array(arrayBuffer));
     const { totalPages, text } = await extractText(pdf, { mergePages: false });

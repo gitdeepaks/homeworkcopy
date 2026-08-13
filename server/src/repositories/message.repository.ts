@@ -1,5 +1,6 @@
 import type { Prisma } from "../generated/prisma/client.js";
 import prisma from "../lib/db.js";
+import type { CitationEnvelope } from "@homeworkcopy/contracts";
 
 export const messageSelect = {
     id: true,
@@ -18,7 +19,7 @@ export type CreateMessageData = {
     conversationId: string;
     role: MessageRecord["role"];
     content: string;
-    citations?: Prisma.InputJsonValue;
+    citations?: CitationEnvelope;
 };
 
 export function findMessagesByConversationId(conversationId: string) {

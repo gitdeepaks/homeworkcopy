@@ -1,0 +1,20 @@
+{
+  "name": "homeworkcopy",
+  "private": true,
+  "packageManager": "bun@1.2.20",
+  "workspaces": [
+    "client",
+    "server",
+    "packages/*"
+  ],
+  "scripts": {
+    "generate": "bun run --cwd server generate",
+    "lint": "bun run --cwd server lint && bun run --cwd client lint",
+    "typecheck": "bun run --cwd packages/contracts typecheck && bun run --cwd server typecheck && bun run --cwd client typecheck",
+    "test": "bun run --cwd packages/contracts test && bun run --cwd server test && bun run --cwd client test",
+    "build": "bun run --cwd server build && bun run --cwd client build",
+    "check": "bun run generate && bun run lint && bun run typecheck && bun run test && bun run build",
+    "prisma:validate": "bun run --cwd server prisma:validate",
+    "prisma:migrate:status": "bun run --cwd server prisma:migrate:status"
+  }
+}

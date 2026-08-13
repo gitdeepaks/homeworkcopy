@@ -4,25 +4,49 @@ export function findUserByClerkId(clerkUserId: string) {
     return prisma.user.findUnique({ where: { clerkUserId } });
 }
 
-export function findUserByEmail(email: string) {
-    return prisma.user.findFirst({
+export function findUsersByEmail(email: string) {
+    return prisma.user.findMany({
         where: { email: { equals: email, mode: "insensitive" } },
+        take: 2,
     });
 }
 
-export function linkUserToClerk(
+export async function linkUserToClerk(
     id: string,
     clerkUserId: string,
     profile: { name: string; image: string | null },
 ) {
-    return prisma.user.update({
-        where: { id },
+    const result = await prisma.user.updateMany({
+        where: {
+            id,
+            OR: [{ clerkUserId: null }, { clerkUserId }],
+        },
         data: {
             clerkUserId,
             name: profile.name,
             image: profile.image,
             emailVerified: true,
         },
+    });
+
+    if (result.count !== 1) return null;
+    return prisma.user.findUniqueOrThrow({ where: { id } });
+}
+
+export function updateUserFromClerk(
+    clerkUserId: string,
+    profile: { name: string; image: string | null },
+) {
+    return prisma.user.updateMany({
+        where: { clerkUserId },
+        data: { ...profile, emailVerified: true },
+    });
+}
+
+export function unlinkDeletedClerkUser(clerkUserId: string) {
+    return prisma.user.updateMany({
+        where: { clerkUserId },
+        data: { clerkUserId: null },
     });
 }
 

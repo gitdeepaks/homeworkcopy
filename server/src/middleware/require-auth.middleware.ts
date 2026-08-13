@@ -2,6 +2,7 @@ import type { NextFunction, Request, Response } from "express";
 import { getAuth } from "@clerk/express";
 import type { Session } from "../lib/session.js";
 import { resolveLocalUser } from "../services/auth.service.js";
+import { UnauthorizedError } from "../types/app-error.js";
 
 declare module "express-serve-static-core" {
     interface Request {
@@ -17,7 +18,7 @@ export async function requireAuth(
     const { userId: clerkUserId } = getAuth(req);
 
     if (!clerkUserId) {
-        res.status(401).json({ error: "Unauthorized" });
+        next(new UnauthorizedError());
         return;
     }
 

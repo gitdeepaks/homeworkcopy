@@ -1,4 +1,4 @@
-import { apiFetch } from "@/shared/lib/api";
+import { apiFetch, apiFetchVoid } from "@/shared/lib/api";
 import type {
     CreateWorkspaceInput,
     UpdateWorkspaceInput,
@@ -28,7 +28,7 @@ export function updateWorkspace(id: string, input: UpdateWorkspaceInput) {
 }
 
 export function deleteWorkspace(id: string) {
-    return apiFetch<void>(`/api/workspaces/${id}`, {
+    return apiFetchVoid(`/api/workspaces/${id}`, {
         method: "DELETE",
     });
 }

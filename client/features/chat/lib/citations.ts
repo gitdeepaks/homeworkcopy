@@ -9,11 +9,11 @@ export function getCitationByIndex(
 
 export function uniqueCitationsBySource(citations: ChatCitation[]) {
     return citations.filter((citation, index, array) => {
-        const key = citation.sourceId ?? citation.url ?? citation.sourceTitle;
+        const key = citation.kind === "source" ? citation.sourceId : citation.url;
         return (
             array.findIndex(
                 (item) =>
-                    (item.sourceId ?? item.url ?? item.sourceTitle) === key,
+                    (item.kind === "source" ? item.sourceId : item.url) === key,
             ) === index
         );
     });

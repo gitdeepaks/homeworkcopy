@@ -5,6 +5,7 @@ import "./globals.css";
 import { cn } from "@/lib/utils";
 import QueryProvider from "@/shared/components/providers/query-provider";
 import { ThemeProvider } from "@/shared/components/providers/theme-provider";
+import { AuthenticatedApiProvider } from "@/shared/components/providers/authenticated-api-provider";
 
 const figtreeHeading = Figtree({ subsets: ['latin'], variable: '--font-heading' });
 
@@ -44,9 +45,9 @@ export default function RootLayout({
             enableSystem
             disableTransitionOnChange
           >
-            <QueryProvider>
-              {children}
-            </QueryProvider>
+            <AuthenticatedApiProvider>
+              <QueryProvider>{children}</QueryProvider>
+            </AuthenticatedApiProvider>
           </ThemeProvider>
         </ClerkProvider>
       </body>

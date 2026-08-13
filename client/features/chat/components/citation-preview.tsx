@@ -12,7 +12,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { useImportWebSearchSource } from "@/features/sources/hooks/use-sources";
 import { SOURCE_TYPE_LABELS } from "@/features/sources/lib/constants";
-import type { SourceType } from "@/features/sources/lib/types";
 import { sourceRoutes } from "@/features/sources/lib/routes";
 import type { ChatCitation } from "../lib/types";
 
@@ -22,7 +21,7 @@ type CitationPreviewProps = {
     markerIndex?: number;
 };
 
-function SourceTypeIcon({ type }: { type: string }) {
+function SourceTypeIcon({ type }: { type: ChatCitation["kind"] extends "source" ? never : string }) {
     switch (type) {
         case "PDF":
             return <FileTextIcon className="size-3.5" />;
@@ -41,17 +40,13 @@ export function CitationPreview({
     markerIndex,
 }: CitationPreviewProps) {
     const importWebSearch = useImportWebSearchSource(workspaceId);
-    const sourceType =
-        citation.sourceType in SOURCE_TYPE_LABELS
-            ? SOURCE_TYPE_LABELS[citation.sourceType as SourceType]
-            : citation.sourceType;
-    const isWeb = citation.sourceType === "WEB" && citation.url;
+    const sourceType = citation.kind === "web" ? "Web" : SOURCE_TYPE_LABELS[citation.sourceType];
 
     return (
         <div className="space-y-3">
             <div className="flex items-start gap-2">
                 <div className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-muted">
-                    <SourceTypeIcon type={citation.sourceType} />
+                    <SourceTypeIcon type={citation.kind === "web" ? "WEBSITE" : citation.sourceType} />
                 </div>
                 <div className="min-w-0 flex-1 space-y-1">
                     <div className="flex items-center gap-2">
@@ -61,7 +56,7 @@ export function CitationPreview({
                             </span>
                         ) : null}
                         <p className="truncate font-medium leading-tight">
-                            {citation.sourceTitle}
+                            {citation.title}
                         </p>
                     </div>
                     <p className="text-xs text-muted-foreground">
@@ -75,7 +70,7 @@ export function CitationPreview({
                 {citation.excerpt}
             </p>
 
-            {isWeb ? (
+            {citation.kind === "web" ? (
                 <div className="flex flex-wrap gap-2">
                     <a
                         href={citation.url}
@@ -94,9 +89,9 @@ export function CitationPreview({
                         disabled={importWebSearch.isPending}
                         onClick={() =>
                             void importWebSearch.mutateAsync({
-                                title: citation.sourceTitle,
+                                title: citation.title,
                                 content: citation.excerpt,
-                                url: citation.url!,
+                                url: citation.url,
                             })
                         }
                     >
@@ -104,7 +99,7 @@ export function CitationPreview({
                         Save to library
                     </Button>
                 </div>
-            ) : citation.sourceId ? (
+            ) : (
                 <Link
                     href={sourceRoutes.detail(workspaceId, citation.sourceId)}
                     className="inline-flex items-center gap-1.5 text-xs font-medium text-primary underline-offset-4 hover:underline"
@@ -112,7 +107,7 @@ export function CitationPreview({
                     <ExternalLinkIcon className="size-3" />
                     Open source
                 </Link>
-            ) : null}
+            )}
         </div>
     );
 }

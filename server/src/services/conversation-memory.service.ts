@@ -70,7 +70,7 @@ export async function summarizeConversationById(
     });
 
     const recentMessages = messages.slice(-16).map((message) => ({
-        role: message.role.toLowerCase() as "user" | "assistant",
+        role: message.role === "USER" ? "user" as const : "assistant" as const,
         content: message.content,
     }));
 

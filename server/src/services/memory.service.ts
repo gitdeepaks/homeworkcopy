@@ -1,5 +1,6 @@
 import {
     addUserMemory,
+    deleteUserMemory,
     updateUserMemory,
 } from "../lib/mem0.js";
 
@@ -35,9 +36,13 @@ export function createMemoryForUser(
  *
  */
 export function updateMemoryForUser(
-    _userId: string,
+    userId: string,
     memoryId: string,
     input: { memory: string },
 ) {
-    return updateUserMemory(memoryId, input);
+    return updateUserMemory(userId, memoryId, input);
+}
+
+export function deleteMemoryForUser(userId: string, memoryId: string) {
+    return deleteUserMemory(userId, memoryId);
 }

@@ -27,7 +27,6 @@ import {
     MarkerIcon,
 } from "@/components/ui/marker";
 import { SOURCE_TYPE_LABELS } from "@/features/sources/lib/constants";
-import type { SourceType } from "@/features/sources/lib/types";
 import { sourceRoutes } from "@/features/sources/lib/routes";
 import { uniqueCitationsBySource } from "../lib/citations";
 import type { ChatCitation } from "../lib/types";
@@ -49,12 +48,6 @@ function SourceTypeIcon({ type }: { type: string }) {
         default:
             return <BookOpenIcon />;
     }
-}
-
-function sourceTypeLabel(type: string) {
-    return type in SOURCE_TYPE_LABELS
-        ? SOURCE_TYPE_LABELS[type as SourceType]
-        : type;
 }
 
 export function CitationSources({
@@ -79,18 +72,15 @@ export function CitationSources({
             <AttachmentGroup className="px-0.5">
                 {unique.map((citation) => {
                     const description = [
-                        citation.sourceType === "WEB"
+                        citation.kind === "web"
                             ? "Web"
-                            : sourceTypeLabel(citation.sourceType),
+                            : SOURCE_TYPE_LABELS[citation.sourceType],
                         citation.page ? `p.${citation.page}` : null,
                     ]
                         .filter(Boolean)
                         .join(" · ");
                     const citationKey =
-                        citation.sourceId ??
-                        citation.url ??
-                        citation.sourceTitle;
-                    const isWeb = citation.sourceType === "WEB" && citation.url;
+                        citation.kind === "web" ? citation.url : citation.sourceId;
 
                     return (
                         <HoverCard key={citationKey}>
@@ -106,7 +96,7 @@ export function CitationSources({
                                     <AttachmentMedia variant="icon">
                                         <SourceTypeIcon
                                             type={
-                                                citation.sourceType === "WEB"
+                                                citation.kind === "web"
                                                     ? "WEBSITE"
                                                     : citation.sourceType
                                             }
@@ -114,7 +104,7 @@ export function CitationSources({
                                     </AttachmentMedia>
                                     <AttachmentContent>
                                         <AttachmentTitle>
-                                            {citation.sourceTitle}
+                                            {citation.title}
                                         </AttachmentTitle>
                                         {description ? (
                                             <AttachmentDescription>
@@ -122,7 +112,7 @@ export function CitationSources({
                                             </AttachmentDescription>
                                         ) : null}
                                     </AttachmentContent>
-                                    {isWeb ? (
+                                    {citation.kind === "web" ? (
                                         <AttachmentTrigger
                                             render={
                                                 <a
@@ -132,7 +122,7 @@ export function CitationSources({
                                                 />
                                             }
                                         />
-                                    ) : citation.sourceId ? (
+                                    ) : (
                                         <AttachmentTrigger
                                             render={
                                                 <Link
@@ -143,7 +133,7 @@ export function CitationSources({
                                                 />
                                             }
                                         />
-                                    ) : null}
+                                    )}
                                 </Attachment>
                             </HoverCardTrigger>
                             <HoverCardContent

@@ -25,6 +25,24 @@ model User {
   @@map("user")
 }
 
+enum ClerkWebhookStatus {
+  PROCESSING
+  PROCESSED
+  FAILED
+}
+
+model ClerkWebhookEvent {
+  id           String             @id
+  type         String
+  status       ClerkWebhookStatus @default(PROCESSING)
+  errorCode    String?
+  receivedAt   DateTime           @default(now())
+  processedAt  DateTime?
+
+  @@index([status, receivedAt])
+  @@map("clerk_webhook_event")
+}
+
 model Session {
   id        String   @id
   expiresAt DateTime

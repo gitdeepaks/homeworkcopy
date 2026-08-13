@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import type { UIMessage } from "ai";
+import { safeValidateUIMessages } from "ai";
 import {
     createConversationForWorkspace,
     deleteConversationForWorkspace,
@@ -59,10 +59,12 @@ export async function deleteConversation(req: Request, res: Response) {
 export async function streamChat(req: Request, res: Response) {
     const { workspaceId } = workspaceIdParamSchema.parse(req.params);
     const body = chatBodySchema.parse(req.body);
+    const validatedMessages = await safeValidateUIMessages({ messages: body.messages });
+    if (!validatedMessages.success) throw validatedMessages.error;
 
     await streamWorkspaceChat(res, workspaceId, req.session.user.id, {
         conversationId: body.conversationId,
-        messages: body.messages as unknown as UIMessage[],
+        messages: validatedMessages.data,
         model: body.model,
         webSearch: body.webSearch,
     });

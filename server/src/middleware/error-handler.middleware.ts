@@ -2,51 +2,61 @@ import type { NextFunction, Request, Response } from "express";
 import multer from "multer";
 import { flattenError, ZodError } from "zod";
 import { AppError } from "../types/app-error.js";
+import { logger } from "../lib/logger.js";
+
+function sendError(
+    res: Response,
+    statusCode: number,
+    requestId: string,
+    code: string,
+    message: string,
+    details?: unknown,
+): void {
+    res.status(statusCode).json({
+        error: {
+            code,
+            message,
+            requestId,
+            ...(details === undefined ? {} : { details }),
+        },
+    });
+}
 
 export function errorHandler(
     error: unknown,
-    _req: Request,
+    req: Request,
     res: Response,
-    _next: NextFunction,
+    next: NextFunction,
 ): void {
+    void next;
     if (error instanceof AppError) {
-        res.status(error.statusCode).json({
-            error: error.message,
-            details: error.details,
-        });
+        sendError(res, error.statusCode, req.requestId, error.code, error.message, error.details);
         return;
     }
 
     if (error instanceof ZodError) {
-        res.status(400).json({
-            error: "Validation failed",
-            details: flattenError(error).fieldErrors,
-        });
+        sendError(res, 400, req.requestId, "VALIDATION_FAILED", "Validation failed", flattenError(error).fieldErrors);
         return;
     }
 
     if (error instanceof multer.MulterError) {
-        res.status(400).json({ error: error.message });
+        sendError(res, 400, req.requestId, "UPLOAD_INVALID", error.message);
         return;
     }
 
     if (error instanceof Error && error.message === "Only PDF files are allowed") {
-        res.status(400).json({ error: error.message });
+        sendError(res, 400, req.requestId, "UPLOAD_INVALID", error.message);
         return;
     }
 
-    const cloudinaryError = error as Error & { http_code?: number; name?: string };
+    const cloudinaryError = error instanceof Error ? error : null;
     if (
-        cloudinaryError.name === "UnexpectedResponse" &&
-        cloudinaryError.http_code === 403
+        cloudinaryError?.name === "UnexpectedResponse"
     ) {
-        res.status(400).json({
-            error:
-                "Cloudinary upload rejected: your API key is missing Upload (create) permission. In Cloudinary Dashboard → Settings → API Keys, use the root secret or create a key with Upload enabled.",
-        });
+        sendError(res, 502, req.requestId, "PROVIDER_REJECTED", "File storage rejected the upload.");
         return;
     }
 
-    console.error(error);
-    res.status(500).json({ error: "Internal server error" });
+    logger.error({ error, requestId: req.requestId }, "request failed");
+    sendError(res, 500, req.requestId, "INTERNAL_ERROR", "Internal server error");
 }

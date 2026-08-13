@@ -13,14 +13,13 @@ function getMessageText(message: UIMessage | ChatMessage) {
 }
 
 function formatCitation(citation: ChatCitation) {
-    if (citation.sourceType === "WEB" && "url" in citation) {
-        const webCitation = citation as ChatCitation & { url?: string };
-        return `- [${citation.sourceTitle}](${webCitation.url ?? ""})\n  ${citation.excerpt}`;
+    if (citation.kind === "web") {
+        return `- [${citation.title}](${citation.url})\n  ${citation.excerpt}`;
     }
 
     const page =
         citation.page !== undefined ? `, page ${citation.page}` : "";
-    return `- ${citation.sourceTitle} (${citation.sourceType}${page})\n  ${citation.excerpt}`;
+    return `- ${citation.title} (${citation.sourceType}${page})\n  ${citation.excerpt}`;
 }
 
 export function exportConversationMarkdown(input: {

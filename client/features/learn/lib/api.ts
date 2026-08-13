@@ -1,4 +1,4 @@
-import { apiFetch } from "@/shared/lib/api";
+import { apiFetch, apiFetchVoid } from "@/shared/lib/api";
 import type { CreateArtifactInput, LearningArtifact } from "./types";
 
 export function listArtifacts(workspaceId: string) {
@@ -27,7 +27,7 @@ export function createArtifact(
 }
 
 export function deleteArtifact(workspaceId: string, artifactId: string) {
-    return apiFetch<void>(
+    return apiFetchVoid(
         `/api/workspaces/${workspaceId}/artifacts/${artifactId}`,
         { method: "DELETE" },
     );

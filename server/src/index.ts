@@ -7,10 +7,16 @@ import { registerRoutes } from "./routes/index.js";
 import { serve } from "inngest/express";
 import { inngest } from "./inngest/client.js";
 import { functions } from "./inngest/index.js";
-const app = express();
+import { requestContext } from "./middleware/request-context.middleware.js";
+import { clerkWebhookRoutes } from "./routes/clerk-webhook.routes.js";
+import { NotFoundError } from "./types/app-error.js";
+import { logger } from "./lib/logger.js";
+
+export const app = express();
 const port = process.env.PORT ?? 8080;
 const clientUrl = process.env.CLIENT_URL ?? "http://localhost:3000";
 
+app.use(requestContext);
 app.use(
     cors({
         origin: clientUrl,
@@ -18,13 +24,15 @@ app.use(
     }),
 );
 
-app.use(express.json());
+app.use("/api/webhooks/clerk", clerkWebhookRoutes);
+app.use(express.json({ limit: "1mb" }));
 app.use(
     clerkMiddleware({
         authorizedParties: [clientUrl],
     }),
 );
-app.use("/api/inngest", serve({ client: inngest, functions }));
+const inngestHandler = serve({ client: inngest, functions });
+app.use("/api/inngest", inngestHandler);
 app.get("/", (_req, res) => {
     res.json({ message: "Hello from Chaibook API" });
 });
@@ -35,8 +43,25 @@ app.get("/health", (_req, res) => {
 
 registerRoutes(app);
 
+app.use((_req, _res, next) => {
+    next(new NotFoundError("Route not found"));
+});
+
 app.use(errorHandler);
 
-app.listen(port, () => {
-    console.log(`Server running on http://localhost:${port}`);
+const server = app.listen(port, () => {
+    logger.info({ port }, "server started");
 });
+
+function shutdown(signal: string) {
+    logger.info({ signal }, "server shutting down");
+    server.close((error) => {
+        if (error) {
+            logger.error({ error }, "server shutdown failed");
+            process.exitCode = 1;
+        }
+    });
+}
+
+process.once("SIGTERM", () => { shutdown("SIGTERM"); });
+process.once("SIGINT", () => { shutdown("SIGINT"); });

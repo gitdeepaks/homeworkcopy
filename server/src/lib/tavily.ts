@@ -66,6 +66,7 @@ export async function searchWeb(query: string): Promise<TavilySearchResponse> {
  */
 export function formatTavilyResultsForPrompt(
     response: TavilySearchResponse,
+    firstIndex = 1,
 ): string {
     if (response.results.length === 0) {
         return "No web results were found.";
@@ -73,7 +74,7 @@ export function formatTavilyResultsForPrompt(
 
     const blocks = response.results.map(
         (result, index) =>
-            `[W${index + 1}] ${result.title} (${result.url})\n${result.content}`,
+            `[W${firstIndex + index}] ${result.title} (${result.url})\n${result.content}`,
     );
 
     const parts = ["Web search results:"];
