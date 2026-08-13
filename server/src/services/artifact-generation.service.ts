@@ -134,7 +134,7 @@ export async function generateArtifactContent(
     sourceText: string,
 ) {
     const system = [
-        `You are Chaibook, an expert learning assistant generating a ${type.toLowerCase()} from workspace source materials.`,
+        `You are Homeworkcopy, an expert learning assistant generating a ${type.toLowerCase()} from notebook source materials.`,
         "Use ONLY the provided source content. Do not invent facts not supported by the sources.",
         "Be clear, educational, and well-structured.",
     ].join("\n");

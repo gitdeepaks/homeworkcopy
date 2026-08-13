@@ -17,7 +17,7 @@ export function CreateWorkspaceCard({
             type="button"
             onClick={onClick}
             className={cn(
-                "group flex min-h-[196px] flex-col items-center justify-center gap-3 rounded-3xl border-2 border-dashed border-border/80 bg-card/50 p-6 text-center transition-all hover:border-primary/40 hover:bg-muted/40 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                "paper-sheet group flex min-h-[196px] flex-col items-center justify-center gap-3 rounded-md border-2 border-dashed p-6 text-center transition-all hover:border-primary/60 hover:bg-accent/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                 className,
             )}
         >

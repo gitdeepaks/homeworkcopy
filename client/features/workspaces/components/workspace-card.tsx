@@ -11,7 +11,6 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { getWorkspaceGradient } from "../lib/workspace-gradients";
 import { workspaceRoutes } from "../lib/routes";
 import type { Workspace } from "../lib/types";
 
@@ -29,29 +28,27 @@ export function WorkspaceCard({
     className,
 }: WorkspaceCardProps) {
     const href = workspaceRoutes.detail(workspace.id);
-    const gradient = getWorkspaceGradient(workspace.id);
-
     return (
         <article
             className={cn(
-                "group/card relative min-h-[196px] overflow-hidden rounded-3xl shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-lg",
+                "paper-sheet group/card relative min-h-[196px] overflow-hidden rounded-md transition-all hover:-translate-y-0.5 hover:shadow-lg",
                 className,
             )}
         >
             <Link
                 href={href}
                 className={cn(
-                    "absolute inset-0 z-0 rounded-3xl bg-linear-to-br focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                    gradient,
+                    "absolute inset-0 z-0 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                 )}
                 aria-label={`Open ${workspace.title}`}
             />
 
-            <div className="pointer-events-none absolute inset-0 bg-linear-to-t from-black/35 via-black/5 to-white/10" />
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-2 bg-sticky-blue" />
+            <div className="pointer-events-none absolute inset-y-0 left-10 w-px bg-[var(--margin-line)]" />
 
             <div className="pointer-events-none relative flex h-full min-h-[196px] flex-col p-5">
                 <div className="flex items-start justify-between gap-2">
-                    <span className="flex size-11 items-center justify-center rounded-2xl bg-white/20 text-2xl backdrop-blur-sm">
+                    <span className="flex size-11 items-center justify-center rounded-md bg-sticky-yellow text-2xl shadow-sm">
                         {workspace.icon ?? "📚"}
                     </span>
 
@@ -66,7 +63,7 @@ export function WorkspaceCard({
                                     <Button
                                         variant="ghost"
                                         size="icon-sm"
-                                        className="size-8 bg-black/15 text-white hover:bg-black/25 hover:text-white"
+                                        className="size-11 bg-paper/80 text-foreground hover:bg-accent"
                                     />
                                 }
                             >
@@ -92,16 +89,16 @@ export function WorkspaceCard({
                     </div>
                 </div>
 
-                <div className="mt-auto space-y-1.5 pt-8 text-white">
-                    <h3 className="line-clamp-2 font-heading text-lg font-semibold leading-snug drop-shadow-sm">
+                <div className="mt-auto space-y-1.5 pt-8 pl-8 text-foreground">
+                    <h3 className="line-clamp-2 font-heading text-2xl font-bold leading-snug">
                         {workspace.title}
                     </h3>
                     {workspace.description ? (
-                        <p className="line-clamp-2 text-sm text-white/85">
+                        <p className="line-clamp-2 text-sm text-muted-foreground">
                             {workspace.description}
                         </p>
                     ) : null}
-                    <p className="text-xs text-white/70">
+                    <p className="text-xs text-muted-foreground">
                         Updated{" "}
                         {formatDistanceToNow(new Date(workspace.updatedAt), {
                             addSuffix: true,

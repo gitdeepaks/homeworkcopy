@@ -289,7 +289,7 @@ export async function streamWorkspaceChat(
                     ? {
                           web_search: tool({
                               description:
-                                  "Search the web for up-to-date information outside the workspace sources.",
+                                  "Search the web for up-to-date information outside the notebook sources.",
                               inputSchema: z.object({
                                   query: z
                                       .string()

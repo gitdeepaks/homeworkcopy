@@ -52,9 +52,9 @@ export function GenerateArtifactDialog({
             <DialogContent className="max-w-lg">
                 <form onSubmit={(event) => void handleSubmit(event)}>
                     <DialogHeader>
-                        <DialogTitle>Generate learning tool</DialogTitle>
+                        <DialogTitle>Create output</DialogTitle>
                         <DialogDescription>
-                            Uses all ready sources in this workspace. Generation
+                            Uses all ready sources in this notebook. Generation
                             runs in the background via Inngest.
                         </DialogDescription>
                     </DialogHeader>

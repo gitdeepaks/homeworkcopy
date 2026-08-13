@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { SettingsIcon } from "lucide-react";
-import { ModeToggle } from "@/components/ui/mode-toggle";
 import { Button } from "@/components/ui/button";
 import {
     Select,
@@ -14,8 +13,8 @@ import {
 import {
     CHAT_MODEL_LABELS,
     CHAT_MODELS,
+    isChatModelId,
     useChatPreferences,
-    type ChatModelId,
 } from "@/features/chat/stores/chat-preferences";
 import { workspaceRoutes } from "../lib/routes";
 import type { Workspace } from "../lib/types";
@@ -35,9 +34,11 @@ export function WorkspaceHeaderActions({
         <div className="flex items-center gap-2">
             <Select
                 value={prefs.model}
-                onValueChange={(value) =>
-                    setModel(workspace.id, value as ChatModelId)
-                }
+                onValueChange={(value) => {
+                    if (isChatModelId(value)) {
+                        setModel(workspace.id, value);
+                    }
+                }}
             >
                 <SelectTrigger className="hidden h-8 w-[140px] sm:flex">
                     <SelectValue />
@@ -51,8 +52,6 @@ export function WorkspaceHeaderActions({
                 </SelectContent>
             </Select>
 
-            <ModeToggle />
-
             <Button
                 nativeButton={false}
                 variant="ghost"
@@ -62,7 +61,7 @@ export function WorkspaceHeaderActions({
                 }
             >
                 <SettingsIcon />
-                <span className="sr-only">Workspace settings</span>
+                <span className="sr-only">Notebook settings</span>
             </Button>
         </div>
     );

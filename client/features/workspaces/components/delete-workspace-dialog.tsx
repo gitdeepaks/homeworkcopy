@@ -32,7 +32,7 @@ export function DeleteWorkspaceDialog({
         <AlertDialog open={open} onOpenChange={onOpenChange}>
             <AlertDialogContent>
                 <AlertDialogHeader>
-                    <AlertDialogTitle>Delete workspace?</AlertDialogTitle>
+                    <AlertDialogTitle>Delete notebook?</AlertDialogTitle>
                     <AlertDialogDescription>
                         This will permanently delete{" "}
                         <span className="font-medium text-foreground">

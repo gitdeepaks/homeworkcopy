@@ -5,12 +5,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
     BookOpenIcon,
-    BrainIcon,
     MessageSquareIcon,
     SearchIcon,
     SparklesIcon,
 } from "lucide-react";
-import { ModeToggle } from "@/components/ui/mode-toggle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -21,8 +19,7 @@ import {
     EmptyTitle,
 } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
-import { SignOutButton } from "@/features/auth/components/sign-out-button";
-import { memoryRoutes } from "@/features/memory";
+import { AccountMenu } from "@/features/auth/components/account-menu";
 import { ApiError } from "@/shared/lib/api";
 import { useDebouncedValue } from "@/shared/hooks/use-debounced-value";
 import {
@@ -55,8 +52,8 @@ const FEATURES = [
     },
     {
         icon: SparklesIcon,
-        title: "Learn faster",
-        description: "Flashcards, quizzes, mind maps, and summaries",
+        title: "Create outputs",
+        description: "Build flashcards, quizzes, mind maps, and summaries in Studio",
     },
 ] as const;
 
@@ -102,48 +99,32 @@ export function DashboardHome({ userName }: DashboardHomeProps) {
     const greeting = userName?.split(" ")[0] ?? "there";
 
     return (
-        <div className="min-h-svh bg-muted/30">
-            <header className="sticky top-0 z-20 border-b bg-background/80 backdrop-blur-md">
+        <div className="notebook-canvas min-h-svh">
+            <header data-print-hidden className="sticky top-0 z-20 border-b bg-paper/90 backdrop-blur-md">
                 <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-4 px-4 md:px-8">
                     <Link
                         href={workspaceRoutes.list}
-                        className="flex items-center gap-2.5 font-heading text-lg font-semibold tracking-tight"
+                        className="flex min-h-11 items-center font-heading text-2xl font-bold tracking-tight"
                     >
-                        <span className="flex size-8 items-center justify-center rounded-xl bg-primary/15 text-base">
-                            📚
-                        </span>
-                        Chaibook
+                        <span className="ink-highlight">Homeworkcopy</span>
                     </Link>
 
-                    <div className="flex items-center gap-1.5 sm:gap-2">
-                        <Button
-                            nativeButton={false}
-                            variant="ghost"
-                            size="sm"
-                            className="hidden sm:inline-flex"
-                            render={<Link href={memoryRoutes.settings} />}
-                        >
-                            <BrainIcon />
-                            Memory
-                        </Button>
-                        <ModeToggle />
-                        <SignOutButton />
-                    </div>
+                    <AccountMenu />
                 </div>
             </header>
 
-            <main className="mx-auto max-w-6xl px-4 py-8 md:px-8 md:py-10">
+            <main id="main-content" className="mx-auto max-w-6xl px-4 py-8 md:px-8 md:py-10">
                 <section className="mb-10 space-y-6">
                     <div className="space-y-2">
-                        <p className="text-sm font-medium text-primary">
+                        <p className="font-heading text-xl font-medium text-primary">
                             Welcome back, {greeting}
                         </p>
-                        <h1 className="font-heading text-3xl font-semibold tracking-tight md:text-4xl">
+                        <h1 className="font-heading text-5xl font-bold tracking-tight md:text-6xl">
                             Your notebooks
                         </h1>
                         <p className="max-w-2xl text-sm text-muted-foreground md:text-base">
                             Organize sources, chat with your materials, and
-                            generate learning tools — all in one workspace.
+                            create outputs, all in one notebook.
                         </p>
                     </div>
 
@@ -151,7 +132,7 @@ export function DashboardHome({ userName }: DashboardHomeProps) {
                         {FEATURES.map((feature) => (
                             <div
                                 key={feature.title}
-                                className="rounded-2xl border bg-card/70 p-4 shadow-sm"
+                                className="paper-tab rounded-r-md p-4 shadow-sm"
                             >
                                 <feature.icon className="mb-2 size-4 text-primary" />
                                 <p className="text-sm font-medium">

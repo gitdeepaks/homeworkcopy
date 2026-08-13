@@ -324,7 +324,7 @@ export function WorkspaceChat({
                                         </p>
                                         <p className="max-w-sm text-sm text-muted-foreground">
                                             Ask questions about the materials
-                                            in this workspace. Answers include
+                                            in this notebook. Answers include
                                             citations when relevant context is
                                             found.
                                         </p>
@@ -371,7 +371,13 @@ export function WorkspaceChat({
                                                                     : "ghost"
                                                             }
                                                         >
-                                                            <BubbleContent className="leading-relaxed">
+                                                            <BubbleContent
+                                                                className={
+                                                                    isUser
+                                                                        ? "font-heading text-lg font-medium leading-7"
+                                                                        : "leading-relaxed"
+                                                                }
+                                                            >
                                                                 {isUser ? (
                                                                     getMessageText(
                                                                         message,

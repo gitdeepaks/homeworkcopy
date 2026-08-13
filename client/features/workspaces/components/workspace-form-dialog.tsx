@@ -136,7 +136,7 @@ export function WorkspaceFormDialog({
                             onChange={(event) =>
                                 setDescription(event.target.value)
                             }
-                            placeholder="What is this workspace about?"
+                            placeholder="What is this notebook about?"
                             maxLength={500}
                             rows={3}
                             disabled={isPending}
@@ -158,7 +158,7 @@ export function WorkspaceFormDialog({
                         </Button>
                         <Button type="submit" disabled={isPending}>
                             {isPending ? <Spinner /> : null}
-                            {isEditing ? "Save changes" : "Create workspace"}
+                            {isEditing ? "Save changes" : "Create notebook"}
                         </Button>
                     </DialogFooter>
                 </form>

@@ -11,6 +11,10 @@ export const CHAT_MODEL_LABELS: Record<ChatModelId, string> = {
     "gpt-4o": "GPT-4o",
 };
 
+export function isChatModelId(model: string | null): model is ChatModelId {
+    return CHAT_MODELS.some((candidate) => candidate === model);
+}
+
 type WorkspaceChatPrefs = {
     model: ChatModelId;
     webSearch: boolean;
@@ -27,8 +31,8 @@ type ChatPreferencesState = {
 };
 
 function resolveModel(model?: string): ChatModelId {
-    if (model && CHAT_MODELS.includes(model as ChatModelId)) {
-        return model as ChatModelId;
+    if (model && isChatModelId(model)) {
+        return model;
     }
 
     return "gpt-4o-mini";

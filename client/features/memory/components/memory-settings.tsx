@@ -57,7 +57,8 @@ export function MemorySettings() {
     }
 
     return (
-        <div className="mx-auto flex min-h-svh w-full max-w-3xl flex-col gap-8 p-6 md:p-10">
+        <main id="main-content" className="notebook-canvas min-h-svh p-4 md:p-8">
+        <div className="ruled-paper mx-auto flex min-h-[calc(100svh-2rem)] w-full max-w-3xl flex-col gap-8 rounded-md p-6 pl-10 md:p-10 md:pl-20">
             <div className="flex items-start justify-between gap-4">
                 <div className="space-y-3">
                     <Button
@@ -77,7 +78,7 @@ export function MemorySettings() {
                         </h1>
                     </div>
                     <p className="max-w-xl text-sm text-muted-foreground">
-                        Powered by Mem0. Chaibook learns stable facts from your
+                        Powered by Mem0. Homeworkcopy learns stable facts from your
                         chats and uses semantic search to recall them in future
                         conversations.
                     </p>
@@ -114,7 +115,7 @@ export function MemorySettings() {
                     {memories.map((memory) => (
                         <div
                             key={memory.id}
-                            className="rounded-3xl border bg-card p-4"
+                            className="paper-sheet rounded-md p-4"
                         >
                             <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0 flex-1 space-y-2">
@@ -179,5 +180,6 @@ export function MemorySettings() {
                 }
             />
         </div>
+        </main>
     );
 }

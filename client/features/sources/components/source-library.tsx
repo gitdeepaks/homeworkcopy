@@ -114,8 +114,8 @@ export function SourceLibrary({ workspaceId }: SourceLibraryProps) {
                     </h2>
                     <p className="text-sm text-muted-foreground">
                         {sources
-                            ? `${sources.length} source${sources.length === 1 ? "" : "s"} in this workspace`
-                            : "All knowledge sources in this workspace"}
+                            ? `${sources.length} source${sources.length === 1 ? "" : "s"} in this notebook`
+                            : "All knowledge sources in this notebook"}
                     </p>
                 </div>
                 <Button onClick={() => setAddOpen(true)} className="shrink-0">

@@ -48,7 +48,7 @@ export function WorkspaceList() {
         return (
             <Empty className="border">
                 <EmptyHeader>
-                    <EmptyTitle>Could not load workspaces</EmptyTitle>
+                    <EmptyTitle>Could not load notebooks</EmptyTitle>
                     <EmptyDescription>
                         {error instanceof ApiError
                             ? error.message
@@ -64,7 +64,7 @@ export function WorkspaceList() {
             <div className="flex items-center justify-between gap-4">
                 <div>
                     <h2 className="font-heading text-lg font-semibold">
-                        Your workspaces
+                        Your notebooks
                     </h2>
                     <p className="text-sm text-muted-foreground">
                         Create notebooks to organize sources and chats.
@@ -72,7 +72,7 @@ export function WorkspaceList() {
                 </div>
                 <Button onClick={() => setCreateOpen(true)}>
                     <PlusIcon />
-                    New workspace
+                    New notebook
                 </Button>
             </div>
 
@@ -90,16 +90,16 @@ export function WorkspaceList() {
             ) : (
                 <Empty className="mt-6 border">
                     <EmptyHeader>
-                        <EmptyTitle>No workspaces yet</EmptyTitle>
+                        <EmptyTitle>No notebooks yet</EmptyTitle>
                         <EmptyDescription>
                             Create your first notebook to get started with
-                            Chaibook.
+                            Homeworkcopy.
                         </EmptyDescription>
                     </EmptyHeader>
                     <EmptyContent>
                         <Button onClick={() => setCreateOpen(true)}>
                             <PlusIcon />
-                            Create workspace
+                            Create notebook
                         </Button>
                     </EmptyContent>
                 </Empty>

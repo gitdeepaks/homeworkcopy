@@ -34,7 +34,7 @@ app.use(
 const inngestHandler = serve({ client: inngest, functions });
 app.use("/api/inngest", inngestHandler);
 app.get("/", (_req, res) => {
-    res.json({ message: "Hello from Chaibook API" });
+    res.json({ message: "Hello from Homeworkcopy API" });
 });
 
 app.get("/health", (_req, res) => {

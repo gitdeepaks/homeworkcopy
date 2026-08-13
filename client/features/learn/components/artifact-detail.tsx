@@ -41,13 +41,13 @@ export function ArtifactDetail({
     if (error instanceof ApiError && error.status === 404) {
         return (
             <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
-                <p className="font-medium">Learning tool not found</p>
+                <p className="font-medium">Output not found</p>
                 <Button
                     nativeButton={false}
                     variant="outline"
                     render={<Link href={learnRoutes.hub(workspaceId)} />}
                 >
-                    Back to Learn
+                    Back to Studio
                 </Button>
             </div>
         );
@@ -56,7 +56,7 @@ export function ArtifactDetail({
     if (error || !artifact) {
         return (
             <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
-                <p className="font-medium">Could not load learning tool</p>
+                <p className="font-medium">Could not load output</p>
             </div>
         );
     }

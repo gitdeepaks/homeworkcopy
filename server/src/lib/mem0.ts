@@ -41,7 +41,7 @@ export type Mem0Message = {
     content: string;
 };
 
-/** Normalized memory record returned by Chaibook memory APIs. */
+/** Normalized memory record returned by Homeworkcopy memory APIs. */
 export type AppMemory = {
     id: string;
     memory: string;

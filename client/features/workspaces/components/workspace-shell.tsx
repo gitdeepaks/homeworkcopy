@@ -12,7 +12,7 @@ import {
     SettingsIcon,
 } from "lucide-react";
 import { learnRoutes } from "@/features/learn";
-import { SignOutButton } from "@/features/auth/components/sign-out-button";
+import { AccountMenu } from "@/features/auth/components/account-menu";
 import {
     AddSourceDialog,
     SourceSidebarList,
@@ -57,13 +57,13 @@ export function WorkspaceShell({ workspace, children }: WorkspaceShellProps) {
     const isSettingsActive = pathname.includes("/settings");
 
     return (
-        <SidebarProvider>
-            <Sidebar>
-                <SidebarHeader className="border-b border-sidebar-border">
+        <SidebarProvider className="notebook-canvas">
+            <Sidebar className="border-r-0 shadow-[4px_0_18px_oklch(0.2_0.03_60/12%)]">
+                <SidebarHeader className="border-b border-sidebar-border bg-sidebar">
                     <div className="flex items-center gap-2 px-2 py-1">
                         <span className="text-xl">{workspace.icon ?? "📚"}</span>
                         <div className="min-w-0 flex-1">
-                            <p className="truncate font-medium">
+                            <p className="truncate font-heading text-xl font-bold">
                                 {workspace.title}
                             </p>
                             {workspace.description ? (
@@ -75,9 +75,9 @@ export function WorkspaceShell({ workspace, children }: WorkspaceShellProps) {
                     </div>
                 </SidebarHeader>
 
-                <SidebarContent>
+                <SidebarContent className="bg-sidebar">
                     <SidebarGroup>
-                        <SidebarGroupLabel>Workspace</SidebarGroupLabel>
+                        <SidebarGroupLabel>Notebook</SidebarGroupLabel>
                         <SidebarGroupContent>
                             <SidebarMenu>
                                 <SidebarMenuItem>
@@ -103,7 +103,7 @@ export function WorkspaceShell({ workspace, children }: WorkspaceShellProps) {
                                         }
                                     >
                                         <GraduationCapIcon />
-                                        <span>Learn</span>
+                                        <span>Studio</span>
                                     </SidebarMenuButton>
                                 </SidebarMenuItem>
                                 <SidebarMenuItem>
@@ -142,7 +142,7 @@ export function WorkspaceShell({ workspace, children }: WorkspaceShellProps) {
                     />
                 </SidebarContent>
 
-                <SidebarFooter className="border-t border-sidebar-border">
+                <SidebarFooter className="border-t border-sidebar-border bg-sidebar">
                     <Button
                         nativeButton={false}
                         variant="ghost"
@@ -150,15 +150,15 @@ export function WorkspaceShell({ workspace, children }: WorkspaceShellProps) {
                         render={<Link href={workspaceRoutes.list} />}
                     >
                         <ArrowLeftIcon />
-                        All workspaces
+                        All notebooks
                     </Button>
                 </SidebarFooter>
 
                 <SidebarRail />
             </Sidebar>
 
-            <SidebarInset>
-                <header className="flex h-14 items-center gap-3 border-b px-4">
+            <SidebarInset className="ruled-paper m-0 min-h-svh rounded-none shadow-none md:m-3 md:min-h-[calc(100svh-1.5rem)] md:rounded-md md:shadow-(--page-shadow)">
+                <header data-print-hidden className="flex min-h-14 items-center gap-3 border-b bg-paper/90 px-3 backdrop-blur-sm sm:px-4">
                     <SidebarTrigger />
                     <div className="min-w-0 flex-1">
                         <h1 className="truncate font-heading text-base font-semibold">
@@ -174,10 +174,10 @@ export function WorkspaceShell({ workspace, children }: WorkspaceShellProps) {
                         Add source
                     </Button>
                     <WorkspaceHeaderActions workspace={workspace} />
-                    <SignOutButton />
+                    <AccountMenu />
                 </header>
 
-                <main className="flex min-h-0 flex-1 flex-col">{children}</main>
+                <main id="main-content" className="flex min-h-0 flex-1 flex-col">{children}</main>
             </SidebarInset>
 
             <AddSourceDialog

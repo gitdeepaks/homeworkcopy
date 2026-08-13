@@ -1,7 +1,7 @@
 {
   "name": "server",
   "version": "1.0.0",
-  "description": "Chaibook API server",
+  "description": "Homeworkcopy API server",
   "main": "dist/index.js",
   "scripts": {
     "dev": "bun run generate && tsx watch src/index.ts",

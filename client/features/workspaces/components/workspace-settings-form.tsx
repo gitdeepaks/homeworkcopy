@@ -16,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
     CHAT_MODEL_LABELS,
     CHAT_MODELS,
+    isChatModelId,
     type ChatModelId,
 } from "@/features/chat/stores/chat-preferences";
 import {
@@ -39,8 +40,8 @@ export function WorkspaceSettingsForm({ workspace }: WorkspaceSettingsFormProps)
     const [description, setDescription] = useState(workspace.description ?? "");
     const [icon, setIcon] = useState(workspace.icon ?? "");
     const [defaultModel, setDefaultModel] = useState<ChatModelId>(
-        CHAT_MODELS.includes(workspace.defaultModel as ChatModelId)
-            ? (workspace.defaultModel as ChatModelId)
+        isChatModelId(workspace.defaultModel)
+            ? workspace.defaultModel
             : "gpt-4o-mini",
     );
 
@@ -64,10 +65,10 @@ export function WorkspaceSettingsForm({ workspace }: WorkspaceSettingsFormProps)
         <div className="mx-auto flex w-full max-w-2xl flex-col gap-8 p-6">
             <div>
                 <h2 className="font-heading text-xl font-semibold">
-                    Workspace settings
+                    Notebook settings
                 </h2>
                 <p className="text-sm text-muted-foreground">
-                    Manage this workspace&apos;s details and defaults.
+                    Manage this notebook&apos;s details and defaults.
                 </p>
             </div>
 
@@ -107,9 +108,11 @@ export function WorkspaceSettingsForm({ workspace }: WorkspaceSettingsFormProps)
                     <Label htmlFor="defaultModel">Default chat model</Label>
                     <Select
                         value={defaultModel}
-                        onValueChange={(value) =>
-                            setDefaultModel(value as ChatModelId)
-                        }
+                        onValueChange={(value) => {
+                            if (isChatModelId(value)) {
+                                setDefaultModel(value);
+                            }
+                        }}
                     >
                         <SelectTrigger id="defaultModel">
                             <SelectValue />
@@ -132,7 +135,7 @@ export function WorkspaceSettingsForm({ workspace }: WorkspaceSettingsFormProps)
             <div className="rounded-xl border border-destructive/30 p-4">
                 <h3 className="font-medium text-destructive">Danger zone</h3>
                 <p className="mt-1 text-sm text-muted-foreground">
-                    Deleting this workspace removes all sources, conversations,
+                    Deleting this notebook removes all sources, conversations,
                     and indexed vectors permanently.
                 </p>
                 <Button
@@ -141,7 +144,7 @@ export function WorkspaceSettingsForm({ workspace }: WorkspaceSettingsFormProps)
                     className="mt-4"
                     onClick={() => setDeleteOpen(true)}
                 >
-                    Delete workspace
+                    Delete notebook
                 </Button>
             </div>
 

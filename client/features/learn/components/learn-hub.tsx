@@ -31,7 +31,7 @@ export function LearnHub({ workspaceId }: LearnHubProps) {
                     <div className="flex items-center gap-2">
                         <GraduationCapIcon className="size-5" />
                         <h2 className="font-heading text-xl font-semibold">
-                            Learning tools
+                            Studio
                         </h2>
                     </div>
                     <p className="max-w-xl text-sm text-muted-foreground">
@@ -53,14 +53,14 @@ export function LearnHub({ workspaceId }: LearnHubProps) {
                 </div>
             ) : error ? (
                 <div className="rounded-2xl border border-dashed p-8 text-center text-sm text-muted-foreground">
-                    Could not load learning tools.
+                    Could not load outputs.
                 </div>
             ) : artifacts.length === 0 ? (
                 <div className="rounded-2xl border border-dashed p-10 text-center">
-                    <p className="font-medium">No learning tools yet</p>
+                    <p className="font-medium">No outputs yet</p>
                     <p className="mt-2 text-sm text-muted-foreground">
                         Generate your first summary, quiz, or flashcard deck
-                        from workspace sources.
+                        from notebook sources.
                     </p>
                     <Button
                         className="mt-4"
@@ -75,7 +75,7 @@ export function LearnHub({ workspaceId }: LearnHubProps) {
                     {artifacts.map((artifact) => (
                         <div
                             key={artifact.id}
-                            className="group relative rounded-3xl border bg-card p-4 transition-colors hover:bg-muted/20"
+                            className="paper-sheet group relative rounded-md border-t-4 border-t-sticky-blue p-4 transition-colors hover:bg-muted/20"
                         >
                             <Link
                                 href={learnRoutes.detail(

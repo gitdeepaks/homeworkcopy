@@ -86,9 +86,12 @@ export function LoginForm({
 
     return (
         <div className={cn("flex flex-col gap-6", className)} {...props}>
-            <Card>
+            <Card className="ruled-paper overflow-hidden rounded-md border-border px-3 py-5 shadow-xl sm:px-6">
                 <CardHeader className="text-center">
-                    <CardTitle className="text-xl">Welcome back</CardTitle>
+                    <p className="font-heading text-4xl font-bold text-primary">
+                        Homeworkcopy
+                    </p>
+                    <CardTitle className="font-heading text-3xl">Welcome back</CardTitle>
                     <CardDescription>
                         Sign in with Google to continue to Homeworkcopy
                     </CardDescription>
@@ -105,7 +108,7 @@ export function LoginForm({
                                 <Button
                                     type="submit"
                                     variant="outline"
-                                    className="w-full"
+                                    className="min-h-11 w-full bg-paper"
                                     disabled={isLoading}
                                 >
                                     {isLoading ? (

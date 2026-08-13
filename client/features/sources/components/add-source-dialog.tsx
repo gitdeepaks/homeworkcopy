@@ -190,7 +190,7 @@ export function AddSourceDialog({
                 <DialogHeader>
                     <DialogTitle>Add source</DialogTitle>
                     <DialogDescription>
-                        Add knowledge to this workspace from text, files, or
+                        Add knowledge to this notebook from text, files, or
                         the web.
                     </DialogDescription>
                 </DialogHeader>
