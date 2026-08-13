@@ -86,14 +86,16 @@ export function LoginForm({
 
     return (
         <div className={cn("flex flex-col gap-6", className)} {...props}>
-            <Card className="ruled-paper overflow-hidden rounded-md border-border px-3 py-5 shadow-xl sm:px-6">
+            <Card className="paper-sheet overflow-hidden rounded-md border-border px-3 py-7 shadow-lg sm:px-7">
                 <CardHeader className="text-center">
-                    <p className="font-heading text-4xl font-bold text-primary">
+                    <p className="font-heading text-3xl font-bold text-primary lg:hidden">
                         Homeworkcopy
                     </p>
-                    <CardTitle className="font-heading text-3xl">Welcome back</CardTitle>
+                    <CardTitle className="font-heading text-4xl font-bold">
+                        Welcome back
+                    </CardTitle>
                     <CardDescription>
-                        Sign in with Google to continue to Homeworkcopy
+                        Pick up where you left off in your notebooks.
                     </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -108,7 +110,7 @@ export function LoginForm({
                                 <Button
                                     type="submit"
                                     variant="outline"
-                                    className="min-h-11 w-full bg-paper"
+                                    className="min-h-12 w-full bg-paper text-base shadow-sm"
                                     disabled={isLoading}
                                 >
                                     {isLoading ? (

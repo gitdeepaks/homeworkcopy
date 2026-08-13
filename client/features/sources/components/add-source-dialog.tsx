@@ -28,12 +28,14 @@ type AddSourceDialogProps = {
     workspaceId: string;
     open: boolean;
     onOpenChange: (open: boolean) => void;
+    onSuccess?: (sourceId: string) => void;
 };
 
 export function AddSourceDialog({
     workspaceId,
     open,
     onOpenChange,
+    onSuccess,
 }: AddSourceDialogProps) {
     const router = useRouter();
     const createSource = useCreateSource(workspaceId);
@@ -87,6 +89,10 @@ export function AddSourceDialog({
 
     async function handleSuccess(sourceId: string) {
         handleOpenChange(false);
+        if (onSuccess) {
+            onSuccess(sourceId);
+            return;
+        }
         router.push(sourceRoutes.detail(workspaceId, sourceId));
         router.refresh();
     }

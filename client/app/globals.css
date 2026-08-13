@@ -197,6 +197,25 @@
     background-size: 19px 23px, 29px 31px;
   }
 
+  .auth-desk {
+    background-color: oklch(0.31 0.045 62);
+    background-image:
+      linear-gradient(105deg, oklch(1 0 0 / 2%), transparent 35%, oklch(0.1 0.02 50 / 8%)),
+      repeating-linear-gradient(88deg, transparent 0 88px, oklch(0.15 0.025 55 / 8%) 89px, transparent 90px 176px);
+  }
+
+  .auth-notebook {
+    background-color: var(--paper);
+    box-shadow: 0 28px 70px oklch(0.08 0.02 55 / 42%), 0 4px 10px oklch(0.08 0.02 55 / 28%);
+  }
+
+  .auth-notebook-copy {
+    background-color: var(--paper);
+    background-image:
+      linear-gradient(to right, transparent 0 3.5rem, var(--margin-line) 3.5rem 3.57rem, transparent 3.57rem),
+      repeating-linear-gradient(to bottom, transparent 0 calc(var(--rule-size) - 1px), var(--ruling) calc(var(--rule-size) - 1px) var(--rule-size));
+  }
+
   .ruled-paper {
     background-color: var(--paper);
     background-image:
@@ -220,6 +239,14 @@
 
   .ink-highlight {
     background: linear-gradient(transparent 58%, var(--citation-highlight) 58% 91%, transparent 91%);
+  }
+
+  .notebook-compact-panels [data-panel][data-active="false"] {
+    display: none !important;
+  }
+
+  .notebook-compact-panels [data-panel][data-active="true"] {
+    flex: 1 1 100% !important;
   }
 
   .skip-link {
@@ -251,6 +278,12 @@
       linear-gradient(to right, transparent 0 1.25rem, var(--margin-line) 1.25rem 1.31rem, transparent 1.31rem),
       repeating-linear-gradient(to bottom, transparent 0 calc(var(--rule-size) - 1px), var(--ruling) calc(var(--rule-size) - 1px) var(--rule-size));
   }
+
+  .auth-notebook {
+    background-image:
+      linear-gradient(to right, transparent 0 1.25rem, var(--margin-line) 1.25rem 1.31rem, transparent 1.31rem),
+      repeating-linear-gradient(to bottom, transparent 0 calc(var(--rule-size) - 1px), var(--ruling) calc(var(--rule-size) - 1px) var(--rule-size));
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -261,13 +294,13 @@
     transition-duration: 0.01ms !important;
   }
 
-  .notebook-canvas {
+  .notebook-canvas, .auth-desk {
     background-image: none;
   }
 }
 
 @media (forced-colors: active) {
-  .notebook-canvas, .ruled-paper {
+  .notebook-canvas, .ruled-paper, .auth-desk, .auth-notebook-copy {
     background-image: none;
   }
 

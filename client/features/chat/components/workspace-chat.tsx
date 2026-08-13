@@ -51,6 +51,7 @@ import { ChatComposer } from "./chat-composer";
 import type { ChatCitation } from "../lib/types";
 import { workspaceRoutes } from "@/features/workspaces/lib/routes";
 import { useChatPreferences } from "../stores/chat-preferences";
+import { useNotebookUiStore } from "@/features/workspaces/stores/notebook-ui-store";
 import {
     downloadMarkdown,
     exportConversationMarkdown,
@@ -77,14 +78,28 @@ export function WorkspaceChat({
     const searchParams = useSearchParams();
     const askPrompt = searchParams.get("ask");
     const handledAskPrompt = useRef<string | null>(null);
-    const [conversationId, setConversationId] = useState<string | null>(null);
+    const conversationId = useNotebookUiStore(
+        (state) => state.byNotebook[workspaceId]?.activeConversationId ?? null,
+    );
+    const composerDraft = useNotebookUiStore(
+        (state) => state.byNotebook[workspaceId]?.composerDraft ?? "",
+    );
+    const setConversationId = useNotebookUiStore(
+        (state) => state.setActiveConversationId,
+    );
+    const setComposerDraft = useNotebookUiStore(
+        (state) => state.setComposerDraft,
+    );
     const [citationsByMessageId, setCitationsByMessageId] = useState<
         Record<string, ChatCitation[]>
     >({});
 
+    const storedPrefs = useChatPreferences(
+        (state) => state.byWorkspace[workspaceId],
+    );
     const getPrefs = useChatPreferences((state) => state.getPrefs);
     const setWebSearch = useChatPreferences((state) => state.setWebSearch);
-    const chatPrefs = getPrefs(workspaceId, defaultModel);
+    const chatPrefs = storedPrefs ?? getPrefs(workspaceId, defaultModel);
 
     const { data: conversations = [], isLoading: conversationsLoading } =
         useConversations(workspaceId);
@@ -99,12 +114,12 @@ export function WorkspaceChat({
 
     const handleConversationId = useCallback(
         (id: string) => {
-            setConversationId(id);
+            setConversationId(workspaceId, id);
             void queryClient.invalidateQueries({
                 queryKey: chatKeys(workspaceId).conversations(),
             });
         },
-        [queryClient, workspaceId],
+        [queryClient, setConversationId, workspaceId],
     );
 
     const transport = useMemo(
@@ -190,10 +205,16 @@ export function WorkspaceChat({
     }, [storedMessages, status]);
 
     useEffect(() => {
+        if (askPrompt && conversationId) {
+            setConversationId(workspaceId, null);
+            setMessages([]);
+            setCitationsByMessageId({});
+            return;
+        }
+
         if (
             !askPrompt ||
             status !== "ready" ||
-            conversationId ||
             messages.length > 0 ||
             handledAskPrompt.current === askPrompt
         ) {
@@ -209,12 +230,14 @@ export function WorkspaceChat({
         conversationId,
         messages.length,
         sendMessage,
+        setConversationId,
+        setMessages,
         router,
         workspaceId,
     ]);
 
     async function handleNewChat() {
-        setConversationId(null);
+        setConversationId(workspaceId, null);
         setMessages([]);
         setCitationsByMessageId({});
     }
@@ -254,7 +277,7 @@ export function WorkspaceChat({
                             void handleNewChat();
                             return;
                         }
-                        setConversationId(value);
+                        setConversationId(workspaceId, value);
                     }}
                 >
                     <SelectTrigger className="max-w-sm flex-1">
@@ -439,6 +462,8 @@ export function WorkspaceChat({
                 onWebSearchChange={(enabled) =>
                     setWebSearch(workspaceId, enabled)
                 }
+                value={composerDraft}
+                onValueChange={(value) => setComposerDraft(workspaceId, value)}
                 onSubmit={(text) => {
                     void sendMessage({ text });
                 }}

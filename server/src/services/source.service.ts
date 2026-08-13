@@ -3,6 +3,7 @@ import { uploadPdfToCloudinary } from "../lib/cloudinary.js";
 import { extractPdfFromBuffer } from "../lib/pdf.js";
 import { scrapeWebsite } from "../lib/firecrawl.js";
 import { enqueueSourceProcessing } from "../lib/source-events.js";
+import { logger } from "../lib/logger.js";
 import { fetchYoutubeTranscript } from "../lib/youtube.js";
 import {
     createSourceRecord,
@@ -22,13 +23,20 @@ import type {
     ListSourcesQuery,
     ReprocessSourcesInput,
 } from "../validators/source.validator.js";
-import { listChunksForSource, removeSourceFromIndex } from "./source-processing.service.js";
+import {
+    listChunksForSource,
+    markSourceFailed,
+    removeSourceFromIndex,
+} from "./source-processing.service.js";
+
+const PROCESSING_QUEUE_UNAVAILABLE =
+    "Source processing could not be queued. Check the background worker and retry.";
 
 /**
  * Persists a source row and enqueues the Inngest processing pipeline.
  *
  * @param data - Fields for the new source record
- * @returns Created source with status `PENDING`
+ * @returns Created source with status `PENDING`, or `FAILED` when the queue is unavailable
  *
  */
 async function createAndProcessSource(
@@ -36,10 +44,27 @@ async function createAndProcessSource(
 ) {
     const source = await createSourceRecord(data);
 
-    await enqueueSourceProcessing({
-        sourceId: source.id,
-        workspaceId: source.workspaceId,
-    });
+    try {
+        await enqueueSourceProcessing({
+            sourceId: source.id,
+            workspaceId: source.workspaceId,
+        });
+    } catch (error) {
+        logger.error(
+            {
+                error,
+                sourceId: source.id,
+                workspaceId: source.workspaceId,
+            },
+            "source processing enqueue failed",
+        );
+
+        return markSourceFailed(
+            source.id,
+            new Error(PROCESSING_QUEUE_UNAVAILABLE),
+            source.metadata,
+        );
+    }
 
     return source;
 }
@@ -351,7 +376,19 @@ export async function reprocessSourceForWorkspace(
         metadata,
     });
 
-    await enqueueSourceProcessing({ sourceId, workspaceId });
+    try {
+        await enqueueSourceProcessing({ sourceId, workspaceId });
+    } catch (error) {
+        logger.error(
+            { error, sourceId, workspaceId },
+            "source reprocessing enqueue failed",
+        );
+        await markSourceFailed(
+            sourceId,
+            new Error(PROCESSING_QUEUE_UNAVAILABLE),
+            metadata,
+        );
+    }
 }
 
 /**

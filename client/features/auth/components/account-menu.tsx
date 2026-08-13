@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Spinner } from "@/components/ui/spinner";
 import { memoryRoutes } from "@/features/memory";
+import { useNotebookUiStore } from "@/features/workspaces/stores/notebook-ui-store";
 import { authRoutes } from "../lib/auth-routes";
 
 const THEMES = [
@@ -52,6 +53,8 @@ export function AccountMenu() {
 
     async function handleSignOut() {
         setIsSigningOut(true);
+        useNotebookUiStore.setState({ byNotebook: {} });
+        await useNotebookUiStore.persist.clearStorage();
         await signOut({ redirectUrl: authRoutes.login });
     }
 

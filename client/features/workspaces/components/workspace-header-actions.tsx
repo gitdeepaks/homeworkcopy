@@ -26,9 +26,12 @@ type WorkspaceHeaderActionsProps = {
 export function WorkspaceHeaderActions({
     workspace,
 }: WorkspaceHeaderActionsProps) {
+    const storedPrefs = useChatPreferences(
+        (state) => state.byWorkspace[workspace.id],
+    );
     const getPrefs = useChatPreferences((state) => state.getPrefs);
     const setModel = useChatPreferences((state) => state.setModel);
-    const prefs = getPrefs(workspace.id, workspace.defaultModel);
+    const prefs = storedPrefs ?? getPrefs(workspace.id, workspace.defaultModel);
 
     return (
         <div className="flex items-center gap-2">

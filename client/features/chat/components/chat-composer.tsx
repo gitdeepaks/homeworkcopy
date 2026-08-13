@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { GlobeIcon, Loader2Icon, SendIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -12,6 +11,8 @@ type ChatComposerProps = {
   isStreaming?: boolean;
   webSearchEnabled?: boolean;
   onWebSearchChange?: (enabled: boolean) => void;
+  value: string;
+  onValueChange: (value: string) => void;
 };
 
 export function ChatComposer({
@@ -20,18 +21,18 @@ export function ChatComposer({
   isStreaming = false,
   webSearchEnabled = false,
   onWebSearchChange,
+  value,
+  onValueChange,
 }: ChatComposerProps) {
-  const [input, setInput] = useState("");
-
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    const text = input.trim();
+    const text = value.trim();
     if (!text || disabled || isStreaming) {
       return;
     }
 
     onSubmit(text);
-    setInput("");
+    onValueChange("");
   }
 
   return (
@@ -63,8 +64,8 @@ export function ChatComposer({
 
         <div className="flex items-end gap-2">
           <Textarea
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
+            value={value}
+            onChange={(event) => onValueChange(event.target.value)}
             placeholder="Ask about your sources…"
             rows={1}
             className="min-h-11 max-h-40 resize-none"
@@ -79,7 +80,7 @@ export function ChatComposer({
           <Button
             type="submit"
             size="icon"
-            disabled={disabled || isStreaming || !input.trim()}
+            disabled={disabled || isStreaming || !value.trim()}
           >
             {isStreaming ? (
               <Loader2Icon className="animate-spin" />
