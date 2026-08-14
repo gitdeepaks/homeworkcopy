@@ -15,6 +15,10 @@ import {
     generateArtifactContent,
 } from "./artifact-generation.service.js";
 import { getWorkspaceByIdForUser } from "./workspace.service.js";
+import {
+    resolveReadySourceRecords,
+    resolveReadySourcesForWorkspace,
+} from "./source.service.js";
 import type { CreateArtifactInput } from "../validators/artifact.validator.js";
 
 /**
@@ -80,12 +84,12 @@ export async function createArtifactForWorkspace(
     userId: string,
     input: CreateArtifactInput,
 ) {
-    await getWorkspaceByIdForUser(workspaceId, userId);
-
-    const context = await gatherSourceContext(
+    const sources = await resolveReadySourcesForWorkspace(
         workspaceId,
-        input.sourceIds,
+        userId,
+        input,
     );
+    const context = gatherSourceContext(sources);
 
     const artifact = await createArtifactRecord({
         workspaceId,
@@ -158,10 +162,11 @@ export async function processArtifactById(artifactId: string) {
     await updateArtifactRecord(artifactId, { status: "PROCESSING" });
 
     try {
-        const context = await gatherSourceContext(
+        const sources = await resolveReadySourceRecords(
             artifact.workspaceId,
-            artifact.sourceIds,
+            { selectionMode: "custom", sourceIds: artifact.sourceIds },
         );
+        const context = gatherSourceContext(sources);
 
         const content = await generateArtifactContent(
             artifact.type,

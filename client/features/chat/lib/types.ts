@@ -1,4 +1,4 @@
-import type { Citation } from "@homeworkcopy/contracts";
+import type { Citation, GroundingSnapshot } from "@homeworkcopy/contracts";
 
 export type ChatCitation = Citation;
 
@@ -16,5 +16,6 @@ export type ChatMessage = {
     role: "USER" | "ASSISTANT";
     content: string;
     citations: ChatCitation[] | null;
+    grounding: GroundingSnapshot | null;
     createdAt: string;
 };

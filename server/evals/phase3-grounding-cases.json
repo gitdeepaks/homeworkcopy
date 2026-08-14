@@ -1,0 +1,45 @@
+[
+  {
+    "id": "selected-source-positive",
+    "query": "What is photosynthesis?",
+    "selectedSourceKeys": ["biology"],
+    "expectedSourceKeys": ["biology"],
+    "shouldAbstain": false
+  },
+  {
+    "id": "selection-excludes-answer",
+    "query": "What is photosynthesis?",
+    "selectedSourceKeys": ["history"],
+    "expectedSourceKeys": [],
+    "shouldAbstain": true
+  },
+  {
+    "id": "follow-up-rewrite",
+    "query": "How does it differ from meiosis?",
+    "conversationContext": "The previous question asked about mitosis.",
+    "selectedSourceKeys": ["biology"],
+    "expectedSourceKeys": ["biology"],
+    "shouldAbstain": false
+  },
+  {
+    "id": "keyword-exact-match",
+    "query": "What does ATP synthase do?",
+    "selectedSourceKeys": ["biology"],
+    "expectedSourceKeys": ["biology"],
+    "shouldAbstain": false
+  },
+  {
+    "id": "foreign-source-rejected",
+    "query": "Summarize the private source",
+    "selectedSourceKeys": ["foreign"],
+    "expectedErrorCode": "SOURCE_SELECTION_UNAVAILABLE",
+    "shouldAbstain": true
+  },
+  {
+    "id": "processing-source-rejected",
+    "query": "Summarize the new source",
+    "selectedSourceKeys": ["processing"],
+    "expectedErrorCode": "SOURCE_SELECTION_UNAVAILABLE",
+    "shouldAbstain": true
+  }
+]

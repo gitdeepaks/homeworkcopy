@@ -1,6 +1,9 @@
 import type { Prisma } from "../generated/prisma/client.js";
 import prisma from "../lib/db.js";
-import type { CitationEnvelope } from "@homeworkcopy/contracts";
+import type {
+    CitationEnvelope,
+    GroundingSnapshot,
+} from "@homeworkcopy/contracts";
 
 export const messageSelect = {
     id: true,
@@ -8,6 +11,7 @@ export const messageSelect = {
     role: true,
     content: true,
     citations: true,
+    grounding: true,
     createdAt: true,
 } as const;
 
@@ -20,6 +24,7 @@ export type CreateMessageData = {
     role: MessageRecord["role"];
     content: string;
     citations?: CitationEnvelope;
+    grounding?: GroundingSnapshot;
 };
 
 export function findMessagesByConversationId(conversationId: string) {
@@ -43,6 +48,7 @@ export function createMessageRecord(data: CreateMessageData) {
             role: data.role,
             content: data.content,
             citations: data.citations,
+            grounding: data.grounding,
         },
         select: messageSelect,
     });

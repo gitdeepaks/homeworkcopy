@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
+import type { SourceSelectionMode } from "@homeworkcopy/contracts";
 
 export type NotebookTab = "sources" | "chat" | "studio";
 export const NOTEBOOK_TABS: readonly NotebookTab[] = [
@@ -21,6 +22,7 @@ type NotebookViewState = {
     sourcesCollapsed: boolean;
     studioCollapsed: boolean;
     mobileTab: NotebookTab;
+    sourceSelectionMode: SourceSelectionMode;
     selectedSourceIds: string[];
     activeSourceId: string | null;
     activeCitationId: string | null;
@@ -38,6 +40,10 @@ type NotebookUiState = {
         collapsed: boolean,
     ) => void;
     setMobileTab: (notebookId: string, tab: NotebookTab) => void;
+    setSourceSelectionMode: (
+        notebookId: string,
+        mode: SourceSelectionMode,
+    ) => void;
     setSelectedSourceIds: (notebookId: string, sourceIds: string[]) => void;
     setActiveSource: (notebookId: string, sourceId: string | null) => void;
     setActiveCitation: (
@@ -57,6 +63,7 @@ export const DEFAULT_NOTEBOOK_VIEW_STATE: NotebookViewState = {
     sourcesCollapsed: false,
     studioCollapsed: false,
     mobileTab: "chat",
+    sourceSelectionMode: "all-ready",
     selectedSourceIds: [],
     activeSourceId: null,
     activeCitationId: null,
@@ -117,9 +124,15 @@ export const useNotebookUiStore = create<NotebookUiState>()(
                 ),
             setMobileTab: (notebookId, mobileTab) =>
                 set((state) => updateNotebook(state, notebookId, { mobileTab })),
+            setSourceSelectionMode: (notebookId, sourceSelectionMode) =>
+                set((state) =>
+                    updateNotebook(state, notebookId, { sourceSelectionMode }),
+                ),
             setSelectedSourceIds: (notebookId, selectedSourceIds) =>
                 set((state) =>
-                    updateNotebook(state, notebookId, { selectedSourceIds }),
+                    updateNotebook(state, notebookId, {
+                        selectedSourceIds: [...new Set(selectedSourceIds)],
+                    }),
                 ),
             setActiveSource: (notebookId, activeSourceId) =>
                 set((state) => updateNotebook(state, notebookId, { activeSourceId })),
@@ -156,7 +169,8 @@ export const useNotebookUiStore = create<NotebookUiState>()(
                             sourcesCollapsed: view.sourcesCollapsed,
                             studioCollapsed: view.studioCollapsed,
                             mobileTab: view.mobileTab,
-                            selectedSourceIds: [],
+                            sourceSelectionMode: view.sourceSelectionMode,
+                            selectedSourceIds: view.selectedSourceIds,
                             activeSourceId: null,
                             activeCitationId: null,
                             sourceViewerLocation: null,

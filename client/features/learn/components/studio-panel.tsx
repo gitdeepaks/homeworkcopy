@@ -10,14 +10,33 @@ import { ARTIFACT_TYPE_LABELS } from "../lib/constants";
 import { learnRoutes } from "../lib/routes";
 import { ArtifactStatusBadge, ArtifactTypeBadge } from "./artifact-status-badge";
 import { GenerateArtifactDialog } from "./generate-artifact-dialog";
+import { useSources } from "@/features/sources";
+import { resolveSourceSelection } from "@/features/sources/lib/grounding";
+import { useNotebookUiStore } from "@/features/workspaces/stores/notebook-ui-store";
 
 type StudioPanelProps = {
     workspaceId: string;
 };
 
+const EMPTY_SOURCE_IDS: string[] = [];
+
 export function StudioPanel({ workspaceId }: StudioPanelProps) {
     const [generateOpen, setGenerateOpen] = useState(false);
     const { data: artifacts = [], isLoading, error } = useArtifacts(workspaceId);
+    const { data: sources = [] } = useSources(workspaceId);
+    const selectionMode = useNotebookUiStore(
+        (state) =>
+            state.byNotebook[workspaceId]?.sourceSelectionMode ?? "all-ready",
+    );
+    const selectedSourceIds = useNotebookUiStore(
+        (state) =>
+            state.byNotebook[workspaceId]?.selectedSourceIds ?? EMPTY_SOURCE_IDS,
+    );
+    const selection = resolveSourceSelection(
+        sources,
+        selectionMode,
+        selectedSourceIds,
+    );
 
     return (
         <section aria-labelledby="studio-panel-title" className="flex h-full min-h-0 flex-col bg-panel/95">
@@ -26,6 +45,10 @@ export function StudioPanel({ workspaceId }: StudioPanelProps) {
                     <div>
                         <h2 id="studio-panel-title" className="font-heading text-xl font-bold">Studio</h2>
                         <p className="text-xs text-muted-foreground">Study tools and saved outputs</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                            {selection.effectiveSourceIds.length} source
+                            {selection.effectiveSourceIds.length === 1 ? "" : "s"} selected
+                        </p>
                     </div>
                     <Button size="icon-sm" onClick={() => setGenerateOpen(true)}>
                         <FilePlus2Icon />

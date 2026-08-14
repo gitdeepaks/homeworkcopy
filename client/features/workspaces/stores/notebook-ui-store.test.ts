@@ -29,12 +29,11 @@ describe("notebook UI store", () => {
     });
 
     test("returns immutable defaults for a new notebook", () => {
-        const view = selectNotebookViewState(
-            useNotebookUiStore.getState(),
-            "new-notebook",
-        );
+        const state = useNotebookUiStore.getState();
+        const view = selectNotebookViewState(state, "new-notebook");
 
         expect(view).toEqual(DEFAULT_NOTEBOOK_VIEW_STATE);
+        expect(selectNotebookViewState(state, "new-notebook")).toBe(view);
         expect(view.mobileTab).toBe("chat");
         expect(view.panelLayout).toEqual({
             sources: 22,
@@ -45,7 +44,12 @@ describe("notebook UI store", () => {
 
     test("updates selected sources and panel preferences without mixing them", () => {
         const state = useNotebookUiStore.getState();
-        state.setSelectedSourceIds("notebook-a", ["source-1", "source-2"]);
+        state.setSourceSelectionMode("notebook-a", "custom");
+        state.setSelectedSourceIds("notebook-a", [
+            "source-1",
+            "source-2",
+            "source-1",
+        ]);
         state.setPanelCollapsed("notebook-a", "studio", true);
         state.setPanelLayout("notebook-a", {
             sources: 24,
@@ -58,6 +62,7 @@ describe("notebook UI store", () => {
             "notebook-a",
         );
         expect(view.selectedSourceIds).toEqual(["source-1", "source-2"]);
+        expect(view.sourceSelectionMode).toBe("custom");
         expect(view.studioCollapsed).toBe(true);
         expect(view.sourcesCollapsed).toBe(false);
         expect(view.panelLayout.chat).toBe(50);

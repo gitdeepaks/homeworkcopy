@@ -1,4 +1,4 @@
-import type { Prisma } from "../generated/prisma/client.js";
+import { Prisma } from "../generated/prisma/client.js";
 import prisma from "../lib/db.js";
 
 export const sourceChunkSelect = {
@@ -56,4 +56,48 @@ export function findChunksBySourceId(sourceId: string) {
         select: sourceChunkSelect,
         orderBy: { index: "asc" },
     });
+}
+
+export type KeywordChunkRecord = {
+    chunkId: string;
+    sourceId: string;
+    chunkIndex: number;
+    text: string;
+    sourceTitle: string;
+    sourceType: string;
+    score: number;
+};
+
+export function searchReadyChunksByKeyword(
+    workspaceId: string,
+    sourceIds: string[],
+    query: string,
+    limit: number,
+) {
+    if (sourceIds.length === 0 || query.trim().length === 0) {
+        return Promise.resolve<KeywordChunkRecord[]>([]);
+    }
+
+    return prisma.$queryRaw<KeywordChunkRecord[]>(Prisma.sql`
+        SELECT
+            sc."id" AS "chunkId",
+            sc."sourceId" AS "sourceId",
+            sc."index" AS "chunkIndex",
+            sc."content" AS "text",
+            s."title" AS "sourceTitle",
+            s."type"::text AS "sourceType",
+            ts_rank_cd(
+                to_tsvector('english', sc."content"),
+                websearch_to_tsquery('english', ${query})
+            )::double precision AS "score"
+        FROM "source_chunk" sc
+        INNER JOIN "source" s ON s."id" = sc."sourceId"
+        WHERE s."workspaceId" = ${workspaceId}
+          AND s."status" = 'READY'
+          AND s."id" IN (${Prisma.join(sourceIds)})
+          AND to_tsvector('english', sc."content")
+              @@ websearch_to_tsquery('english', ${query})
+        ORDER BY "score" DESC
+        LIMIT ${limit}
+    `);
 }

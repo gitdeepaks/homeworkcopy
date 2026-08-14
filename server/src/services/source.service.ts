@@ -9,12 +9,14 @@ import {
     createSourceRecord,
     deleteSourceRecord,
     findSourceByIdAndWorkspaceId,
+    findSourcesByIdsAndWorkspaceId,
     findSourcesByWorkspaceId,
     updateSourceRecord,
     type SourceRecord,
 } from "../repositories/source.repository.js";
 import { getWorkspaceByIdForUser } from "./workspace.service.js";
 import { NotFoundError } from "../types/app-error.js";
+import type { SourceSelection } from "@homeworkcopy/contracts";
 import type {
     CreateSourceInput,
     ImportWebsiteInput,
@@ -28,6 +30,7 @@ import {
     markSourceFailed,
     removeSourceFromIndex,
 } from "./source-processing.service.js";
+import { validateGroundingSourceCandidates } from "./grounding-source-selection.js";
 
 const PROCESSING_QUEUE_UNAVAILABLE =
     "Source processing could not be queued. Check the background worker and retry.";
@@ -85,6 +88,33 @@ export async function listSourcesForWorkspace(
 ) {
     await getWorkspaceByIdForUser(workspaceId, userId);
     return findSourcesByWorkspaceId(workspaceId, filters);
+}
+
+export async function resolveReadySourcesForWorkspace(
+    workspaceId: string,
+    userId: string,
+    selection: SourceSelection,
+): Promise<SourceRecord[]> {
+    await getWorkspaceByIdForUser(workspaceId, userId);
+    return resolveReadySourceRecords(workspaceId, selection);
+}
+
+export async function resolveReadySourceRecords(
+    workspaceId: string,
+    selection: SourceSelection,
+): Promise<SourceRecord[]> {
+    if (selection.selectionMode === "all-ready") {
+        const readySources = await findSourcesByWorkspaceId(workspaceId, {
+            status: "READY",
+        });
+        return validateGroundingSourceCandidates(selection, readySources);
+    }
+
+    const sources = await findSourcesByIdsAndWorkspaceId(
+        selection.sourceIds,
+        workspaceId,
+    );
+    return validateGroundingSourceCandidates(selection, sources);
 }
 
 /**

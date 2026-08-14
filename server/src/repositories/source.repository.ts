@@ -67,6 +67,19 @@ export function findSourceByIdAndWorkspaceId(
     });
 }
 
+export function findSourcesByIdsAndWorkspaceId(
+    sourceIds: string[],
+    workspaceId: string,
+) {
+    return prisma.source.findMany({
+        where: {
+            id: { in: sourceIds },
+            workspaceId,
+        },
+        select: sourceSelect,
+    });
+}
+
 export function createSourceRecord(data: CreateSourceData) {
     return prisma.source.create({
         data: {

@@ -6,7 +6,6 @@ import {
     deleteConversation,
     listConversationMessages,
     listConversations,
-    parseCitations,
 } from "../lib/api";
 
 export function chatKeys(workspaceId: string) {
@@ -68,12 +67,11 @@ export function useDeleteConversation(workspaceId: string) {
 }
 
 export function buildCitationMap(messages: Awaited<ReturnType<typeof listConversationMessages>>) {
-    const map: Record<string, NonNullable<ReturnType<typeof parseCitations>>> =
-        {};
+    const map: Record<string, NonNullable<(typeof messages)[number]["citations"]>> = {};
 
     for (const message of messages) {
         if (message.role === "ASSISTANT") {
-            const citations = parseCitations(message.citations);
+            const citations = message.citations;
             if (citations?.length) {
                 map[message.id] = citations;
             }

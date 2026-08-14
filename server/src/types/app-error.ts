@@ -51,3 +51,24 @@ export class ProviderTimeoutError extends AppError {
         this.name = "ProviderTimeoutError";
     }
 }
+
+export class SourceSelectionError extends AppError {
+    constructor(
+        code: "NO_READY_SOURCES" | "SOURCE_SELECTION_UNAVAILABLE",
+        message: string,
+    ) {
+        super(code === "NO_READY_SOURCES" ? 400 : 409, code, message);
+        this.name = "SourceSelectionError";
+    }
+}
+
+export class WebSearchUnavailableError extends AppError {
+    constructor() {
+        super(
+            503,
+            "WEB_SEARCH_UNAVAILABLE",
+            "Web grounding is temporarily unavailable. Choose notebook-only mode or try again later.",
+        );
+        this.name = "WebSearchUnavailableError";
+    }
+}

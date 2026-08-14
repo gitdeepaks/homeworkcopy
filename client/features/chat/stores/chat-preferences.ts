@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import type { GroundingMode } from "@homeworkcopy/contracts";
 
 export const CHAT_MODELS = ["gpt-4o-mini", "gpt-4o"] as const;
 export type ChatModelId = (typeof CHAT_MODELS)[number];
@@ -15,19 +16,25 @@ export function isChatModelId(model: string | null): model is ChatModelId {
     return CHAT_MODELS.some((candidate) => candidate === model);
 }
 
+type StoredWorkspaceChatPrefs = {
+    model: ChatModelId;
+    groundingMode?: GroundingMode;
+    webSearch?: boolean;
+};
+
 type WorkspaceChatPrefs = {
     model: ChatModelId;
-    webSearch: boolean;
+    groundingMode: GroundingMode;
 };
 
 type ChatPreferencesState = {
-    byWorkspace: Record<string, WorkspaceChatPrefs>;
+    byWorkspace: Record<string, StoredWorkspaceChatPrefs>;
     getPrefs: (
         workspaceId: string,
         defaultModel?: string,
     ) => WorkspaceChatPrefs;
     setModel: (workspaceId: string, model: ChatModelId) => void;
-    setWebSearch: (workspaceId: string, enabled: boolean) => void;
+    setGroundingMode: (workspaceId: string, mode: GroundingMode) => void;
 };
 
 function resolveModel(model?: string): ChatModelId {
@@ -45,12 +52,17 @@ export const useChatPreferences = create<ChatPreferencesState>()(
             getPrefs: (workspaceId, defaultModel) => {
                 const existing = get().byWorkspace[workspaceId];
                 if (existing) {
-                    return existing;
+                    return {
+                        model: existing.model,
+                        groundingMode:
+                            existing.groundingMode ??
+                            (existing.webSearch ? "notebook-web" : "notebook"),
+                    };
                 }
 
                 return {
                     model: resolveModel(defaultModel),
-                    webSearch: false,
+                    groundingMode: "notebook",
                 };
             },
             setModel: (workspaceId, model) =>
@@ -63,13 +75,14 @@ export const useChatPreferences = create<ChatPreferencesState>()(
                         },
                     },
                 })),
-            setWebSearch: (workspaceId, webSearch) =>
+            setGroundingMode: (workspaceId, groundingMode) =>
                 set((state) => ({
                     byWorkspace: {
                         ...state.byWorkspace,
                         [workspaceId]: {
                             ...state.getPrefs(workspaceId),
-                            webSearch,
+                            groundingMode,
+                            webSearch: undefined,
                         },
                     },
                 })),

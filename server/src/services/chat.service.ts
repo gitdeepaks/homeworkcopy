@@ -36,6 +36,7 @@ import { enqueueConversationSummarize } from "../lib/conversation-events.js";
 import {
     buildChatSystemPrompt,
     retrieveWorkspaceContext,
+    rewriteFollowUpQuery,
 } from "../lib/rag/retrieve.js";
 import {
     createConversationRecord,
@@ -55,14 +56,27 @@ import {
     formatTavilyResultsForPrompt,
     searchWeb,
 } from "../lib/tavily.js";
-import { NotFoundError, ValidationError } from "../types/app-error.js";
+import {
+    NotFoundError,
+    ValidationError,
+    WebSearchUnavailableError,
+} from "../types/app-error.js";
 import {
     buildConversationTitle,
     getLastUserMessageText,
     getTextFromUIMessage,
 } from "../utils/chat-message.js";
 import { getWorkspaceByIdForUser } from "./workspace.service.js";
-import type { SourceCitation, WebCitation } from "@homeworkcopy/contracts";
+import { resolveReadySourcesForWorkspace } from "./source.service.js";
+import {
+    RETRIEVAL_VERSION,
+    type GroundingMode,
+    type GroundingSnapshot,
+    type SourceCitation,
+    type SourceSelectionMode,
+    type WebCitation,
+} from "@homeworkcopy/contracts";
+import { logger } from "../lib/logger.js";
 
 /**
  * Lists all conversations in a workspace for the sidebar/history UI.
@@ -222,20 +236,41 @@ export async function streamWorkspaceChat(
         conversationId?: string;
         messages: UIMessage[];
         model?: string;
-        webSearch?: boolean;
+        selectionMode: SourceSelectionMode;
+        sourceIds: string[];
+        groundingMode: GroundingMode;
     },
 ) {
     const workspace = await getWorkspaceByIdForUser(workspaceId, userId);
     const requestedModel = input.model ?? workspace.defaultModel;
     const chatModel =
         CHAT_MODELS.find((model) => model === requestedModel) ?? CHAT_MODEL;
-    const webSearchEnabled =
-        input.webSearch === true && !!process.env.TAVILY_API_KEY?.trim();
+    const webSearchEnabled = input.groundingMode === "notebook-web";
+    if (webSearchEnabled && !process.env.TAVILY_API_KEY?.trim()) {
+        throw new WebSearchUnavailableError();
+    }
 
     const userText = getLastUserMessageText(input.messages);
     if (!userText) {
         throw new ValidationError("A user message is required");
     }
+
+    const selectedSources = await resolveReadySourcesForWorkspace(
+        workspaceId,
+        userId,
+        {
+            selectionMode: input.selectionMode,
+            sourceIds: input.sourceIds,
+        },
+    );
+    const resolvedSourceIds = selectedSources.map((source) => source.id);
+    const grounding: GroundingSnapshot = {
+        version: 1,
+        selectionMode: input.selectionMode,
+        groundingMode: input.groundingMode,
+        sourceIds: resolvedSourceIds,
+        retrievalVersion: RETRIEVAL_VERSION,
+    };
 
     const conversation = await resolveConversation(
         workspaceId,
@@ -247,12 +282,32 @@ export async function streamWorkspaceChat(
         conversationId: conversation.id,
         role: "USER",
         content: userText,
+        grounding,
     });
 
-    const [retrievedChunks, userMemories] = await Promise.all([
-        retrieveWorkspaceContext(workspaceId, userText),
+    const retrievalQuery = rewriteFollowUpQuery(
+        input.messages,
+        conversation.summary,
+    );
+    const [retrieval, userMemories] = await Promise.all([
+        retrieveWorkspaceContext({
+            workspaceId,
+            sourceIds: resolvedSourceIds,
+            query: retrievalQuery,
+        }),
         searchUserMemories(userId, userText),
     ]);
+    const retrievedChunks = retrieval.chunks;
+    logger.info(
+        {
+            workspaceId,
+            conversationId: conversation.id,
+            groundingMode: input.groundingMode,
+            selectionMode: input.selectionMode,
+            ...retrieval.diagnostics,
+        },
+        "grounding retrieval completed",
+    );
 
     const citations: SourceCitation[] = retrievedChunks.map((chunk, index) => ({
         kind: "source",
@@ -264,13 +319,13 @@ export async function streamWorkspaceChat(
         chunkId: chunk.chunkId,
         chunkIndex: chunk.chunkIndex,
         ...(chunk.page === undefined ? {} : { page: chunk.page }),
-        provenance: { provider: "pinecone", score: chunk.score },
+        provenance: { provider: chunk.retrievalProvider, score: chunk.score },
     }));
     const systemPrompt = buildChatSystemPrompt({
         chunks: retrievedChunks,
         conversationSummary: conversation.summary,
         userMemories: userMemories.map((memory) => memory.memory),
-        webSearchEnabled,
+        groundingMode: input.groundingMode,
     });
 
     const contextMessages =
@@ -299,15 +354,17 @@ export async function streamWorkspaceChat(
                               }),
                               execute: async ({ query }) => {
                                   const results = await searchWeb(query);
-                                  const firstIndex = webCitations.length + 1;
-                                  for (const [index, result] of results.results.entries()) {
+                                  const validResults = results.results.flatMap((result) => {
                                       const url = z.url({ protocol: /^https?$/ }).safeParse(result.url);
-                                      if (!url.success) continue;
+                                      return url.success ? [{ ...result, url: url.data }] : [];
+                                  });
+                                  const firstIndex = webCitations.length + 1;
+                                  for (const [index, result] of validResults.entries()) {
                                       webCitations.push({
                                           kind: "web",
                                           label: `W${firstIndex + index}`,
                                           title: result.title,
-                                          url: url.data,
+                                          url: result.url,
                                           excerpt: result.content.slice(0, 280),
                                           provenance: {
                                               provider: "tavily",
@@ -316,7 +373,10 @@ export async function streamWorkspaceChat(
                                           },
                                       });
                                   }
-                                  return formatTavilyResultsForPrompt(results, firstIndex);
+                                  return formatTavilyResultsForPrompt(
+                                      { ...results, results: validResults },
+                                      firstIndex,
+                                  );
                               },
                           }),
                       }
@@ -342,13 +402,38 @@ export async function streamWorkspaceChat(
                 return;
             }
 
-            const allCitations = [...citations, ...webCitations];
+            const citedLabels = new Set(
+                [...assistantText.matchAll(/\[(W?\d+)\]/g)].flatMap((match) =>
+                    match[1] ? [match[1]] : [],
+                ),
+            );
+            const allCitations = [...citations, ...webCitations].filter(
+                (citation) => citedLabels.has(citation.label),
+            );
+
+            logger.info(
+                {
+                    workspaceId,
+                    conversationId: conversation.id,
+                    selectedSourceCount: resolvedSourceIds.length,
+                    retrievedChunkCount: retrievedChunks.length,
+                    citedChunkCount: allCitations.filter(
+                        (citation) => citation.kind === "source",
+                    ).length,
+                    webCitationCount: allCitations.filter(
+                        (citation) => citation.kind === "web",
+                    ).length,
+                    noContext: retrievedChunks.length === 0,
+                },
+                "grounded response completed",
+            );
 
             await createMessageRecord({
                 conversationId: conversation.id,
                 role: "ASSISTANT",
                 content: assistantText,
                 citations: { version: 1, items: allCitations },
+                grounding,
             });
 
             await touchConversation(conversation.id);
@@ -381,7 +466,10 @@ export async function streamWorkspaceChat(
                     conversationId: conversation.id,
                 },
             ).catch((error) => {
-                console.error("Mem0 add failed:", error);
+                logger.warn(
+                    { error, conversationId: conversation.id, userId },
+                    "Mem0 add failed",
+                );
             });
         },
     });

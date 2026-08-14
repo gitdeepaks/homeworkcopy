@@ -21,12 +21,16 @@ import {
 } from "../lib/constants";
 import { useCreateArtifact } from "../hooks/use-artifacts";
 import type { ArtifactType } from "../lib/types";
+import { useNotebookUiStore } from "@/features/workspaces/stores/notebook-ui-store";
+import { resolveSourceSelection } from "@/features/sources/lib/grounding";
 
 type GenerateArtifactDialogProps = {
     workspaceId: string;
     open: boolean;
     onOpenChange: (open: boolean) => void;
 };
+
+const EMPTY_SOURCE_IDS: string[] = [];
 
 export function GenerateArtifactDialog({
     workspaceId,
@@ -41,6 +45,19 @@ export function GenerateArtifactDialog({
         isLoading: sourcesLoading,
         error: sourcesError,
     } = useSources(workspaceId);
+    const selectionMode = useNotebookUiStore(
+        (state) =>
+            state.byNotebook[workspaceId]?.sourceSelectionMode ?? "all-ready",
+    );
+    const selectedSourceIds = useNotebookUiStore(
+        (state) =>
+            state.byNotebook[workspaceId]?.selectedSourceIds ?? EMPTY_SOURCE_IDS,
+    );
+    const selection = resolveSourceSelection(
+        sources,
+        selectionMode,
+        selectedSourceIds,
+    );
     const readySourceCount = sources.filter(
         (source) => source.status === "READY",
     ).length;
@@ -48,7 +65,8 @@ export function GenerateArtifactDialog({
         (source) =>
             source.status === "PENDING" || source.status === "PROCESSING",
     ).length;
-    const canGenerate = !sourcesLoading && readySourceCount > 0;
+    const canGenerate =
+        !sourcesLoading && !sourcesError && selection.canUseSelection;
 
     async function handleSubmit(event: React.FormEvent) {
         event.preventDefault();
@@ -61,6 +79,7 @@ export function GenerateArtifactDialog({
             await createArtifact.mutateAsync({
                 type,
                 title: title.trim() || undefined,
+                ...selection.request,
             });
         } catch {
             return;
@@ -77,8 +96,8 @@ export function GenerateArtifactDialog({
                     <DialogHeader>
                         <DialogTitle>Create output</DialogTitle>
                         <DialogDescription>
-                            Uses all ready sources in this notebook. Generation
-                            continues in the background.
+                            Uses exactly the source selection shown in this
+                            notebook. Generation continues in the background.
                         </DialogDescription>
                     </DialogHeader>
 
@@ -99,6 +118,23 @@ export function GenerateArtifactDialog({
                                 Could not verify source readiness. Close this
                                 dialog and try again.
                             </p>
+                        ) : selection.exceedsSourceLimit ? (
+                            <p
+                                role="alert"
+                                className="rounded-md border border-amber-600/40 bg-amber-500/10 px-3 py-2 text-sm"
+                            >
+                                Choose at most 50 sources before creating an
+                                output.
+                            </p>
+                        ) : selection.unavailableSourceIds.length > 0 ? (
+                            <p
+                                role="alert"
+                                className="rounded-md border border-amber-600/40 bg-amber-500/10 px-3 py-2 text-sm"
+                            >
+                                One or more selected sources are unavailable.
+                                Update the selection in Sources before creating
+                                an output.
+                            </p>
                         ) : readySourceCount === 0 ? (
                             <p
                                 role="status"
@@ -108,10 +144,18 @@ export function GenerateArtifactDialog({
                                     ? `${processingSourceCount} source${processingSourceCount === 1 ? " is" : "s are"} still processing. You can create an output when at least one source is ready.`
                                     : "Add and process at least one source before creating an output."}
                             </p>
+                        ) : selection.effectiveSourceIds.length === 0 ? (
+                            <p
+                                role="status"
+                                className="rounded-md border border-amber-600/40 bg-amber-500/10 px-3 py-2 text-sm"
+                            >
+                                Select at least one ready source before creating
+                                an output.
+                            </p>
                         ) : (
                             <p className="text-sm text-muted-foreground">
-                                {readySourceCount} ready source
-                                {readySourceCount === 1 ? "" : "s"} will be
+                                {selection.effectiveSourceIds.length} selected source
+                                {selection.effectiveSourceIds.length === 1 ? "" : "s"} will be
                                 used.
                             </p>
                         )}

@@ -173,15 +173,21 @@ export async function queryWorkspaceVectors(
     workspaceId: string,
     vector: number[],
     topK: number,
+    sourceIds: string[],
 ) {
     const index = await getPineconeIndex();
     const result = await index.namespace(workspaceId).query({
         vector,
         topK,
         includeMetadata: true,
+        filter: buildSourceSelectionFilter(sourceIds),
     });
 
     return result.matches ?? [];
+}
+
+export function buildSourceSelectionFilter(sourceIds: string[]) {
+    return { sourceId: { $in: sourceIds } };
 }
 
 export { indexName as PINECONE_INDEX_NAME };

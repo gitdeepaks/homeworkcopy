@@ -2,7 +2,7 @@ import { generateText, Output } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
 import { CHAT_MODEL } from "../lib/ai-config.js";
-import { findSourcesByWorkspaceId } from "../repositories/source.repository.js";
+import type { SourceRecord } from "../repositories/source.repository.js";
 import type { ArtifactRecord } from "../repositories/artifact.repository.js";
 import { ValidationError } from "../types/app-error.js";
 
@@ -70,33 +70,23 @@ const reportSchema = z.object({
 /**
  * Collects and concatenates text from READY workspace sources for artifact generation.
  *
- * @param workspaceId - Workspace whose sources to read
- * @param sourceIds - Optional subset of source ids; defaults to all READY sources
- * @returns Combined source text (max 120k chars) and the ids actually used
- * @throws {ValidationError} When no ready sources exist or none have extracted content
+ * @param sources - Exact READY source snapshot already authorized by the caller
+ * @returns Combined source text (max 120k chars) and the ids used
+ * @throws {ValidationError} When no source has extracted content
  *
  *
  *
  */
-export async function gatherSourceContext(
-    workspaceId: string,
-    sourceIds?: string[],
+export function gatherSourceContext(
+    sources: SourceRecord[],
 ) {
-    const sources = await findSourcesByWorkspaceId(workspaceId, {
-        status: "READY",
-    });
-
-    const selected = sourceIds?.length
-        ? sources.filter((source) => sourceIds.includes(source.id))
-        : sources;
-
-    if (selected.length === 0) {
+    if (sources.length === 0) {
         throw new ValidationError(
             "No ready sources found. Add and process sources before generating learning tools.",
         );
     }
 
-    const withContent = selected.flatMap((source) => {
+    const withContent = sources.flatMap((source) => {
         const content = source.content?.trim();
         return content ? [{ title: source.title, content }] : [];
     });
@@ -114,7 +104,7 @@ export async function gatherSourceContext(
 
     return {
         text,
-        sourceIds: selected.map((source) => source.id),
+        sourceIds: sources.map((source) => source.id),
     };
 }
 

@@ -1,6 +1,11 @@
 import { apiFetch, apiFetchVoid } from "@/shared/lib/api";
 import type { ChatMessage, Conversation } from "./types";
-import { citationEnvelopeSchema, citationSchema, sourceTypeSchema } from "@homeworkcopy/contracts";
+import {
+    citationEnvelopeSchema,
+    citationSchema,
+    groundingSnapshotSchema,
+    sourceTypeSchema,
+} from "@homeworkcopy/contracts";
 import { z } from "zod";
 
 const legacyCitationSchema = z.object({
@@ -35,8 +40,14 @@ export function listConversationMessages(
     workspaceId: string,
     conversationId: string,
 ) {
-    return apiFetch<ChatMessage[]>(
+    return apiFetch<ChatMessageWire[]>(
         `/api/workspaces/${workspaceId}/conversations/${conversationId}/messages`,
+    ).then((messages) =>
+        messages.map((message) => ({
+            ...message,
+            citations: parseCitations(message.citations),
+            grounding: parseGrounding(message.grounding),
+        })),
     );
 }
 
@@ -50,7 +61,13 @@ export function deleteConversation(
     );
 }
 
-export function parseCitations(value: unknown): ChatMessage["citations"] {
+type JsonValue = z.infer<typeof z.json>;
+type ChatMessageWire = Omit<ChatMessage, "citations" | "grounding"> & {
+    citations: JsonValue;
+    grounding: JsonValue;
+};
+
+export function parseCitations(value: JsonValue): ChatMessage["citations"] {
     const envelope = citationEnvelopeSchema.safeParse(value);
     if (envelope.success) return envelope.data.items;
 
@@ -86,4 +103,9 @@ export function parseCitations(value: unknown): ChatMessage["citations"] {
         });
         return citation.success ? [citation.data] : [];
     });
+}
+
+export function parseGrounding(value: JsonValue): ChatMessage["grounding"] {
+    const grounding = groundingSnapshotSchema.safeParse(value);
+    return grounding.success ? grounding.data : null;
 }

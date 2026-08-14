@@ -52,6 +52,8 @@ import type { ChatCitation } from "../lib/types";
 import { workspaceRoutes } from "@/features/workspaces/lib/routes";
 import { useChatPreferences } from "../stores/chat-preferences";
 import { useNotebookUiStore } from "@/features/workspaces/stores/notebook-ui-store";
+import { useSources } from "@/features/sources";
+import { resolveSourceSelection } from "@/features/sources/lib/grounding";
 import {
     downloadMarkdown,
     exportConversationMarkdown,
@@ -61,6 +63,8 @@ type WorkspaceChatProps = {
     workspaceId: string;
     defaultModel?: string;
 };
+
+const EMPTY_SOURCE_IDS: string[] = [];
 
 function getMessageText(message: UIMessage) {
     return message.parts
@@ -84,6 +88,14 @@ export function WorkspaceChat({
     const composerDraft = useNotebookUiStore(
         (state) => state.byNotebook[workspaceId]?.composerDraft ?? "",
     );
+    const sourceSelectionMode = useNotebookUiStore(
+        (state) =>
+            state.byNotebook[workspaceId]?.sourceSelectionMode ?? "all-ready",
+    );
+    const selectedSourceIds = useNotebookUiStore(
+        (state) =>
+            state.byNotebook[workspaceId]?.selectedSourceIds ?? EMPTY_SOURCE_IDS,
+    );
     const setConversationId = useNotebookUiStore(
         (state) => state.setActiveConversationId,
     );
@@ -98,11 +110,45 @@ export function WorkspaceChat({
         (state) => state.byWorkspace[workspaceId],
     );
     const getPrefs = useChatPreferences((state) => state.getPrefs);
-    const setWebSearch = useChatPreferences((state) => state.setWebSearch);
-    const chatPrefs = storedPrefs ?? getPrefs(workspaceId, defaultModel);
+    const setGroundingMode = useChatPreferences(
+        (state) => state.setGroundingMode,
+    );
+    const chatPrefs = storedPrefs
+        ? {
+              model: storedPrefs.model,
+              groundingMode:
+                  storedPrefs.groundingMode ??
+                  (storedPrefs.webSearch ? "notebook-web" : "notebook"),
+          }
+        : getPrefs(workspaceId, defaultModel);
 
     const { data: conversations = [], isLoading: conversationsLoading } =
         useConversations(workspaceId);
+    const {
+        data: sources = [],
+        isLoading: sourcesLoading,
+        error: sourcesError,
+    } = useSources(workspaceId);
+    const sourceSelection = useMemo(
+        () =>
+            resolveSourceSelection(
+                sources,
+                sourceSelectionMode,
+                selectedSourceIds,
+            ),
+        [sources, sourceSelectionMode, selectedSourceIds],
+    );
+    const selectionWarning = sourcesError
+        ? "Could not verify the selected sources. Try again."
+        : sourceSelection.exceedsSourceLimit
+          ? "Choose at most 50 sources for grounding."
+          : sourceSelection.unavailableSourceIds.length > 0
+            ? "One or more selected sources are unavailable. Update the selection in Sources."
+            : sourceSelection.effectiveSourceIds.length === 0
+              ? "Select at least one ready source before asking a question."
+              : undefined;
+    const canSend =
+        !sourcesLoading && !sourcesError && sourceSelection.canUseSelection;
     const { data: storedMessages, isLoading: messagesLoading } =
         useConversationMessages(workspaceId, conversationId);
     const createConversation = useCreateConversation(workspaceId);
@@ -130,7 +176,9 @@ export function WorkspaceChat({
                 body: {
                     ...(conversationId ? { conversationId } : {}),
                     model: chatPrefs.model,
-                    webSearch: chatPrefs.webSearch,
+                    groundingMode: chatPrefs.groundingMode,
+                    selectionMode: sourceSelection.request.selectionMode,
+                    sourceIds: sourceSelection.request.sourceIds,
                 },
                 fetch: Object.assign(async (
                     url: Parameters<typeof fetch>[0],
@@ -155,7 +203,9 @@ export function WorkspaceChat({
             conversationId,
             handleConversationId,
             chatPrefs.model,
-            chatPrefs.webSearch,
+            chatPrefs.groundingMode,
+            sourceSelection.request.selectionMode,
+            sourceSelection.request.sourceIds,
         ],
     );
 
@@ -214,6 +264,7 @@ export function WorkspaceChat({
 
         if (
             !askPrompt ||
+            !canSend ||
             status !== "ready" ||
             messages.length > 0 ||
             handledAskPrompt.current === askPrompt
@@ -234,6 +285,7 @@ export function WorkspaceChat({
         setMessages,
         router,
         workspaceId,
+        canSend,
     ]);
 
     async function handleNewChat() {
@@ -456,12 +508,14 @@ export function WorkspaceChat({
             ) : null}
 
             <ChatComposer
-                disabled={createConversation.isPending}
+                disabled={createConversation.isPending || !canSend}
                 isStreaming={isStreaming}
-                webSearchEnabled={chatPrefs.webSearch}
-                onWebSearchChange={(enabled) =>
-                    setWebSearch(workspaceId, enabled)
+                groundingMode={chatPrefs.groundingMode}
+                onGroundingModeChange={(mode) =>
+                    setGroundingMode(workspaceId, mode)
                 }
+                selectedSourceCount={sourceSelection.effectiveSourceIds.length}
+                selectionWarning={selectionWarning}
                 value={composerDraft}
                 onValueChange={(value) => setComposerDraft(workspaceId, value)}
                 onSubmit={(text) => {

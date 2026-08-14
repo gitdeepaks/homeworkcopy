@@ -1,6 +1,6 @@
-export type SourceType = "PDF" | "WEBSITE" | "YOUTUBE" | "TEXT" | "MARKDOWN";
+import type { SourceStatus, SourceType } from "@homeworkcopy/contracts";
 
-export type SourceStatus = "PENDING" | "PROCESSING" | "READY" | "FAILED";
+export type { SourceStatus, SourceType };
 
 export type Source = {
     id: string;

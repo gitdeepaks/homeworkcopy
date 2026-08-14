@@ -21,10 +21,9 @@ export type LearningArtifact = {
     updatedAt: string;
 };
 
-export type CreateArtifactInput = {
+export type CreateArtifactInput = SourceSelection & {
     type: ArtifactType;
     title?: string;
-    sourceIds?: string[];
 };
 
 export type Flashcard = { front: string; back: string };
@@ -38,3 +37,4 @@ export type QuizQuestion = {
 
 export type MindMapNode = { id: string; label: string };
 export type MindMapEdge = { id: string; source: string; target: string };
+import type { SourceSelection } from "@homeworkcopy/contracts";

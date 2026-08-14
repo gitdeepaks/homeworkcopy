@@ -10,7 +10,7 @@
     "start": "node dist/index.js",
     "typecheck": "bun run generate && tsc --noEmit && tsc --project tsconfig.scripts.json",
     "lint": "eslint src --max-warnings=0",
-    "test": "bun test --pass-with-no-tests",
+    "test": "bun test src --pass-with-no-tests",
     "prisma:validate": "prisma validate",
     "prisma:migrate:status": "prisma migrate status",
     "auth:reconcile": "tsx scripts/reconcile-clerk.ts"

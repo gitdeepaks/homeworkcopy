@@ -66,6 +66,8 @@ export async function streamChat(req: Request, res: Response) {
         conversationId: body.conversationId,
         messages: validatedMessages.data,
         model: body.model,
-        webSearch: body.webSearch,
+        selectionMode: body.selectionMode,
+        sourceIds: body.sourceIds,
+        groundingMode: body.groundingMode,
     });
 }
