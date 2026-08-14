@@ -18,6 +18,7 @@ const vectorMetadataSchema = z.object({
     chunkId: z.string().min(1),
     chunkIndex: z.number().int().nonnegative(),
     page: z.number().int().positive().optional(),
+    timestamp: z.number().finite().nonnegative().optional(),
     text: z.string(),
 });
 
@@ -28,6 +29,7 @@ export type RetrievedChunk = {
     chunkId: string;
     chunkIndex: number;
     page?: number;
+    timestamp?: number;
     text: string;
     score: number;
     retrievalProvider: "pinecone" | "postgres" | "hybrid";

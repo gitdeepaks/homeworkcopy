@@ -279,6 +279,7 @@ export async function importYoutubeSource(
         status: "PENDING",
         metadata: {
             videoId: transcript.videoId,
+            transcriptSegments: transcript.segments,
         },
     });
 }
@@ -317,8 +318,9 @@ export async function getSourceChunksForWorkspace(
     sourceId: string,
     userId: string,
 ) {
-    await getSourceForWorkspace(workspaceId, sourceId, userId);
-    return listChunksForSource(sourceId);
+    const source = await getSourceForWorkspace(workspaceId, sourceId, userId);
+    const result = await listChunksForSource(sourceId);
+    return { source, ...result };
 }
 
 /**

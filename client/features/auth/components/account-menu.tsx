@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useClerk, useUser } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/shared/components/providers/theme-provider";
 import {
     BrainIcon,
     CheckIcon,

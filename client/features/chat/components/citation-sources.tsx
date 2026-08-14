@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import {
     BookOpenIcon,
     FileTextIcon,
@@ -27,7 +26,7 @@ import {
     MarkerIcon,
 } from "@/components/ui/marker";
 import { SOURCE_TYPE_LABELS } from "@/features/sources/lib/constants";
-import { sourceRoutes } from "@/features/sources/lib/routes";
+import { useNotebookUiStore } from "@/features/workspaces/stores/notebook-ui-store";
 import { uniqueCitationsBySource } from "../lib/citations";
 import type { ChatCitation } from "../lib/types";
 import { CitationPreview } from "./citation-preview";
@@ -55,6 +54,7 @@ export function CitationSources({
     citations,
 }: CitationSourcesProps) {
     const unique = uniqueCitationsBySource(citations);
+    const openCitation = useNotebookUiStore((state) => state.openCitation);
 
     if (unique.length === 0) {
         return null;
@@ -112,28 +112,22 @@ export function CitationSources({
                                             </AttachmentDescription>
                                         ) : null}
                                     </AttachmentContent>
-                                    {citation.kind === "web" ? (
-                                        <AttachmentTrigger
-                                            render={
-                                                <a
-                                                    href={citation.url}
-                                                    target="_blank"
-                                                    rel="noreferrer"
-                                                />
-                                            }
-                                        />
-                                    ) : (
-                                        <AttachmentTrigger
-                                            render={
-                                                <Link
-                                                    href={sourceRoutes.detail(
+                                    <AttachmentTrigger
+                                        render={
+                                            <button
+                                                type="button"
+                                                aria-label={`Open citation ${citation.label}: ${citation.title}`}
+                                                aria-haspopup="dialog"
+                                                onClick={() =>
+                                                    openCitation(
                                                         workspaceId,
-                                                        citation.sourceId,
-                                                    )}
-                                                />
-                                            }
-                                        />
-                                    )}
+                                                        citation,
+                                                        citations,
+                                                    )
+                                                }
+                                            />
+                                        }
+                                    />
                                 </Attachment>
                             </HoverCardTrigger>
                             <HoverCardContent
@@ -144,6 +138,7 @@ export function CitationSources({
                                 <CitationPreview
                                     citation={citation}
                                     workspaceId={workspaceId}
+                                    citations={citations}
                                 />
                             </HoverCardContent>
                         </HoverCard>

@@ -28,7 +28,12 @@ export const processSource = inngest.createFunction(
       );
 
       await step.run("chunk-content", () =>
-        chunkSourceContent(sourceId, extracted.text, extracted.pages),
+        chunkSourceContent(
+          sourceId,
+          extracted.text,
+          extracted.pages,
+          extracted.transcriptSegments,
+        ),
       );
 
       const result = await step.run("embed-and-index", async () => {
@@ -48,7 +53,11 @@ export const processSource = inngest.createFunction(
       await step.run("mark-failed", async () => {
         const source = await findSourceById(sourceId);
         if (source) {
-          await markSourceFailed(sourceId, error, source.metadata);
+          await markSourceFailed(
+            sourceId,
+            error instanceof Error ? error : new Error("Source processing failed"),
+            source.metadata,
+          );
         }
       });
       throw error;

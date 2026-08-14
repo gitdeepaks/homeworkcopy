@@ -8,6 +8,7 @@ import {
     createSource,
     deleteSource,
     getSource,
+    getSourceChunks,
     importWebsiteSource,
     importWebSearchSource,
     importYoutubeSource,
@@ -30,7 +31,22 @@ export function sourceKeys(workspaceId: string) {
             ["sources", workspaceId, "list", filters ?? {}] as const,
         detail: (sourceId: string) =>
             ["sources", workspaceId, sourceId] as const,
+        chunks: (sourceId: string) =>
+            ["sources", workspaceId, sourceId, "chunks"] as const,
     };
+}
+
+export function useSourceChunks(
+    workspaceId: string,
+    sourceId: string | null,
+) {
+    return useQuery({
+        queryKey: sourceKeys(workspaceId).chunks(sourceId ?? "inactive"),
+        queryFn: () => getSourceChunks(workspaceId, sourceId ?? ""),
+        enabled: sourceId !== null,
+        retry: (_, error) =>
+            !(error instanceof ApiError && error.status === 404),
+    });
 }
 
 export function useSources(

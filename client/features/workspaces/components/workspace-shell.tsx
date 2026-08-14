@@ -13,8 +13,10 @@ import {
 } from "lucide-react";
 import { AccountMenu } from "@/features/auth/components/account-menu";
 import { WorkspaceChat } from "@/features/chat";
+import { useChatPreferences } from "@/features/chat/stores/chat-preferences";
 import { StudioPanel } from "@/features/learn/components/studio-panel";
 import { SourcesPanel } from "@/features/sources/components/sources-panel";
+import { SourceViewer } from "@/features/sources/components/source-viewer";
 import { Button } from "@/components/ui/button";
 import {
     ResizableHandle,
@@ -71,6 +73,7 @@ export function WorkspaceShell({ workspace, children }: WorkspaceShellProps) {
 
     useEffect(() => {
         void useNotebookUiStore.persist.rehydrate();
+        void useChatPreferences.persist.rehydrate();
     }, []);
 
     useEffect(() => {
@@ -251,6 +254,7 @@ export function WorkspaceShell({ workspace, children }: WorkspaceShellProps) {
                                     );
                                 })}
                             </div>
+                            <SourceViewer workspaceId={workspace.id} />
                         </>
                     ) : (
                         <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>

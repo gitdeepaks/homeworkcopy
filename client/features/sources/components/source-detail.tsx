@@ -56,17 +56,12 @@ export function SourceDetail({ workspaceId, sourceId }: SourceDetailProps) {
         );
     }
 
-    const metadata = source.metadata ?? {};
     const fileUrl =
-        typeof metadata.fileUrl === "string" ? metadata.fileUrl : null;
+        source.type === "PDF" ? source.metadata?.fileUrl ?? null : null;
     const fileName =
-        typeof metadata.fileName === "string" ? metadata.fileName : null;
-    const chunkCount =
-        typeof metadata.chunkCount === "number" ? metadata.chunkCount : null;
-    const processingError =
-        typeof metadata.processingError === "string"
-            ? metadata.processingError
-            : null;
+        source.type === "PDF" ? source.metadata?.fileName ?? null : null;
+    const chunkCount = source.metadata?.chunkCount ?? null;
+    const processingError = source.metadata?.processingError ?? null;
     const isProcessing =
         source.status === "PENDING" || source.status === "PROCESSING";
 

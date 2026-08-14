@@ -58,6 +58,7 @@ export function ChatMessageBody({
                             citation={citation}
                             workspaceId={workspaceId}
                             prefix="W"
+                            citations={citations}
                         />
                     );
                 }
@@ -78,6 +79,7 @@ export function ChatMessageBody({
                         index={citationIndex}
                         citation={citation}
                         workspaceId={workspaceId}
+                        citations={citations}
                     />
                 );
             },

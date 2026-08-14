@@ -1,4 +1,8 @@
-import { apiErrorResponseSchema } from "@homeworkcopy/contracts";
+import {
+    apiErrorResponseSchema,
+    type JsonValue,
+} from "@homeworkcopy/contracts";
+import type { ZodType } from "zod";
 
 type TokenGetter = () => Promise<string | null>;
 let tokenGetter: TokenGetter | null = null;
@@ -11,7 +15,7 @@ export class ApiError extends Error {
     constructor(
         public status: number,
         message: string,
-        public details?: unknown,
+        public details?: JsonValue,
     ) {
         super(message);
         this.name = "ApiError";
@@ -63,6 +67,15 @@ export async function apiFetch<T>(
     return data;
 }
 
+export async function apiFetchWithSchema<T>(
+    path: string,
+    schema: ZodType<T>,
+    options: RequestInit = {},
+): Promise<T> {
+    const data = await apiFetch(path, options);
+    return schema.parse(data);
+}
+
 export async function apiFetchVoid(
     path: string,
     options: RequestInit = {},
@@ -70,7 +83,7 @@ export async function apiFetchVoid(
     const response = await authenticatedFetch(path, options);
     if (response.ok) return;
 
-    const data: unknown = await response.json().catch(() => null);
+    const data = await response.json().catch(() => null);
     const parsed = apiErrorResponseSchema.safeParse(data);
     throw new ApiError(response.status, parsed.success ? parsed.data.error.message : "Request failed", parsed.success ? parsed.data.error.details : undefined);
 }

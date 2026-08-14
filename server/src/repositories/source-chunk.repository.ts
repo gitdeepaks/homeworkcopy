@@ -54,6 +54,19 @@ export function findChunksBySourceId(sourceId: string) {
     });
 }
 
+export function findExistingChunkIds(
+    workspaceId: string,
+    chunkIds: string[],
+) {
+    return prisma.sourceChunk.findMany({
+        where: {
+            id: { in: chunkIds },
+            source: { workspaceId },
+        },
+        select: { id: true },
+    });
+}
+
 export type KeywordChunkRecord = {
     chunkId: string;
     sourceId: string;
@@ -61,6 +74,7 @@ export type KeywordChunkRecord = {
     text: string;
     sourceTitle: string;
     sourceType: string;
+    timestamp?: number;
     score: number;
 };
 
@@ -82,6 +96,7 @@ export function searchReadyChunksByKeyword(
             sc."content" AS "text",
             s."title" AS "sourceTitle",
             s."type"::text AS "sourceType",
+            (sc."metadata"->>'timestamp')::double precision AS "timestamp",
             ts_rank_cd(
                 to_tsvector('english', sc."content"),
                 websearch_to_tsquery('english', ${query})

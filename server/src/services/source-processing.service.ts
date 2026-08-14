@@ -16,7 +16,12 @@
  */
 
 import type { PineconeRecord } from "@pinecone-database/pinecone";
-import { z } from "zod";
+import {
+    sourceChunkMetadataSchema,
+    storedSourceMetadataSchema,
+    type StoredSourceMetadata,
+    type TranscriptSegment,
+} from "@homeworkcopy/contracts";
 import { chunkPages, chunkText } from "../lib/chunking.js";
 import { embedTexts } from "../lib/openai.js";
 import { extractPdfFromCloudinary } from "../lib/pdf.js";
@@ -37,37 +42,8 @@ import {
     type SourceRecord,
 } from "../repositories/source.repository.js";
 
-/** Shape of JSON stored on a source's `metadata` column. */
-type SourceMetadata = {
-    fileUrl?: string;
-    fileName?: string;
-    fileSize?: number;
-    publicId?: string;
-    resourceType?: "raw" | "image";
-    importedFrom?: string;
-    videoId?: string;
-    processingError?: string;
-    chunkCount?: number;
-    pageCount?: number;
-    indexedAt?: string;
-};
-
-const sourceMetadataSchema = z.object({
-    fileUrl: z.string().optional(),
-    fileName: z.string().optional(),
-    fileSize: z.number().optional(),
-    publicId: z.string().optional(),
-    resourceType: z.enum(["raw", "image"]).optional(),
-    importedFrom: z.string().optional(),
-    videoId: z.string().optional(),
-    processingError: z.string().optional(),
-    chunkCount: z.number().optional(),
-    pageCount: z.number().optional(),
-    indexedAt: z.string().optional(),
-});
-
-function parseMetadata(value: unknown): SourceMetadata {
-    return sourceMetadataSchema.safeParse(value).data ?? {};
+function parseMetadata(value: SourceRecord["metadata"]): StoredSourceMetadata {
+    return storedSourceMetadataSchema.safeParse(value).data ?? {};
 }
 
 /**
@@ -83,29 +59,38 @@ function parseMetadata(value: unknown): SourceMetadata {
  */
 async function extractSourceText(source: SourceRecord) {
     const text = source.content?.trim();
+    if (source.type === "PDF") {
+        const metadata = parseMetadata(source.metadata);
+        if (metadata.fileUrl) {
+            const extracted = await extractPdfFromCloudinary({
+                fileUrl: metadata.fileUrl,
+                publicId: metadata.publicId,
+                resourceType: metadata.resourceType ?? "image",
+            });
+            return {
+                text: extracted.text,
+                pageCount: extracted.pageCount,
+                pages: extracted.pages,
+                transcriptSegments: undefined,
+            };
+        }
+        if (!text) throw new Error("PDF source is missing fileUrl metadata");
+        return {
+            text,
+            pageCount: metadata.pageCount,
+            pages: undefined,
+            transcriptSegments: undefined,
+        };
+    }
+
     if (text) {
+        const metadata = parseMetadata(source.metadata);
         return {
             text,
             pageCount: undefined,
             pages: undefined,
-        };
-    }
-
-    if (source.type === "PDF") {
-        const metadata = parseMetadata(source.metadata);
-        if (!metadata.fileUrl) {
-            throw new Error("PDF source is missing fileUrl metadata");
-        }
-
-        const extracted = await extractPdfFromCloudinary({
-            fileUrl: metadata.fileUrl,
-            publicId: metadata.publicId,
-            resourceType: metadata.resourceType ?? "image",
-        });
-        return {
-            text: extracted.text,
-            pageCount: extracted.pageCount,
-            pages: extracted.pages,
+            transcriptSegments:
+                source.type === "YOUTUBE" ? metadata.transcriptSegments : undefined,
         };
     }
 
@@ -127,19 +112,16 @@ export function markSourceProcessing(sourceId: string) {
  */
 export async function markSourceFailed(
     sourceId: string,
-    error: unknown,
+    error: Error,
     existingMetadata: SourceRecord["metadata"],
 ) {
-    const message =
-        error instanceof Error ? error.message : "Source processing failed";
-
     const metadata = parseMetadata(existingMetadata);
 
     return updateSourceRecord(sourceId, {
         status: "FAILED",
         metadata: {
             ...metadata,
-            processingError: message,
+            processingError: error.message,
         },
     });
 }
@@ -177,6 +159,7 @@ export async function extractSourceContent(sourceId: string) {
         workspaceId: source.workspaceId,
         text: extracted.text,
         pages: extracted.pages,
+        transcriptSegments: extracted.transcriptSegments,
         source,
     };
 }
@@ -200,10 +183,15 @@ export async function chunkSourceContent(
     sourceId: string,
     text: string,
     pages?: string[],
+    transcriptSegments?: TranscriptSegment[],
 ) {
     await deleteChunksBySourceId(sourceId);
 
-    const chunks = pages?.length ? chunkPages(pages) : chunkText(text);
+    const chunks = pages?.length
+        ? chunkPages(pages)
+        : transcriptSegments?.length
+          ? chunkTranscriptSegments(transcriptSegments)
+          : chunkText(text);
 
     if (chunks.length === 0) {
         throw new Error("No chunks were generated from source content");
@@ -215,7 +203,9 @@ export async function chunkSourceContent(
             index: chunk.index,
             content: chunk.content,
             tokenCount: Math.ceil(chunk.content.length / 4),
-            metadata: chunk.metadata ? z.record(z.string(), z.json()).parse(chunk.metadata) : undefined,
+            metadata: chunk.metadata
+                ? sourceChunkMetadataSchema.parse(chunk.metadata)
+                : undefined,
         })),
     );
 }
@@ -252,12 +242,7 @@ export async function embedAndIndexSource(
             const chunk = batch[j];
             const embedding = embeddings[j];
             if (!chunk || !embedding) continue;
-            const chunkMetadata =
-                chunk.metadata &&
-                    typeof chunk.metadata === "object" &&
-                    !Array.isArray(chunk.metadata)
-                    ? chunk.metadata
-                    : {};
+            const chunkMetadata = sourceChunkMetadataSchema.safeParse(chunk.metadata).data ?? {};
 
             records.push({
                 id: chunk.id,
@@ -272,6 +257,9 @@ export async function embedAndIndexSource(
                     text: chunk.content.slice(0, 35000),
                     ...(typeof chunkMetadata.page === "number"
                         ? { page: chunkMetadata.page }
+                        : {}),
+                    ...(typeof chunkMetadata.timestamp === "number"
+                        ? { timestamp: chunkMetadata.timestamp }
                         : {}),
                 },
             });
@@ -291,6 +279,43 @@ export async function embedAndIndexSource(
             processingError: undefined,
         },
     });
+}
+
+function chunkTranscriptSegments(segments: TranscriptSegment[]) {
+    const chunks: Array<{
+        index: number;
+        content: string;
+        metadata: { timestamp: number; endTimestamp: number };
+    }> = [];
+    let content = "";
+    let timestamp = 0;
+    let endTimestamp = 0;
+
+    for (const segment of segments) {
+        if (!content) timestamp = segment.offset;
+        const next = content ? `${content} ${segment.text}` : segment.text;
+        if (next.length > 1_600 && content) {
+            chunks.push({
+                index: chunks.length,
+                content,
+                metadata: { timestamp, endTimestamp },
+            });
+            content = segment.text;
+            timestamp = segment.offset;
+        } else {
+            content = next;
+        }
+        endTimestamp = segment.offset + segment.duration;
+    }
+
+    if (content) {
+        chunks.push({
+            index: chunks.length,
+            content,
+            metadata: { timestamp, endTimestamp },
+        });
+    }
+    return chunks;
 }
 
 /**

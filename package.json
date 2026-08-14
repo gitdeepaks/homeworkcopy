@@ -8,6 +8,10 @@
     "packages/*"
   ],
   "scripts": {
+    "dev": "concurrently --kill-others-on-fail --names client,server,inngest --prefix-colors blue,green,magenta \"bun run dev:client\" \"bun run dev:server\" \"bun run dev:inngest\"",
+    "dev:client": "bun run --cwd client dev",
+    "dev:server": "bun run --cwd server dev",
+    "dev:inngest": "inngest dev -u http://localhost:8080/api/inngest",
     "generate": "bun run --cwd server generate",
     "lint": "bun run --cwd server lint && bun run --cwd client lint",
     "typecheck": "bun run --cwd packages/contracts typecheck && bun run --cwd server typecheck && bun run --cwd client typecheck",
@@ -16,5 +20,12 @@
     "check": "bun run generate && bun run lint && bun run typecheck && bun run test && bun run build",
     "prisma:validate": "bun run --cwd server prisma:validate",
     "prisma:migrate:status": "bun run --cwd server prisma:migrate:status"
-  }
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.4",
+    "inngest-cli": "^1.41.1"
+  },
+  "trustedDependencies": [
+    "inngest-cli"
+  ]
 }

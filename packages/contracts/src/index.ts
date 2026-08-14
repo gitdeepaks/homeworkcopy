@@ -77,6 +77,12 @@ const citationBaseSchema = z.object({
     timestamp: z.number().finite().nonnegative().optional(),
 });
 
+export const citationAvailabilitySchema = z.enum([
+    "available",
+    "source-unavailable",
+    "chunk-unavailable",
+]);
+
 export const sourceCitationSchema = citationBaseSchema.extend({
     kind: z.literal("source"),
     sourceId: z.string().min(1),
@@ -85,6 +91,7 @@ export const sourceCitationSchema = citationBaseSchema.extend({
         provider: z.enum(["pinecone", "postgres", "hybrid"]),
         score: z.number().finite().optional(),
     }),
+    availability: citationAvailabilitySchema.optional(),
 });
 
 export const webCitationSchema = citationBaseSchema.extend({
@@ -104,21 +111,135 @@ export const citationSchema = z.discriminatedUnion("kind", [
 
 export const citationEnvelopeSchema = z.object({
     version: z.literal(1),
-    items: z.array(citationSchema),
+    items: z.array(citationSchema).refine(
+        (items) => new Set(items.map((item) => item.label)).size === items.length,
+        { message: "Citation labels must be unique" },
+    ),
 });
 
 export type Citation = z.infer<typeof citationSchema>;
 export type SourceCitation = z.infer<typeof sourceCitationSchema>;
 export type WebCitation = z.infer<typeof webCitationSchema>;
 export type CitationEnvelope = z.infer<typeof citationEnvelopeSchema>;
+export type CitationAvailability = z.infer<typeof citationAvailabilitySchema>;
+
+const sourceMetadataCommonSchema = z.object({
+    processingError: z.string().min(1).optional(),
+    chunkCount: z.number().int().nonnegative().optional(),
+    indexedAt: z.iso.datetime().optional(),
+});
+
+export const transcriptSegmentSchema = z.object({
+    text: z.string().min(1),
+    offset: z.number().finite().nonnegative(),
+    duration: z.number().finite().nonnegative(),
+});
+
+export const pdfSourceMetadataSchema = sourceMetadataCommonSchema.extend({
+    fileUrl: z.url({ protocol: /^https?$/ }).optional(),
+    fileName: z.string().min(1).optional(),
+    fileSize: z.number().int().nonnegative().optional(),
+    publicId: z.string().min(1).optional(),
+    resourceType: z.enum(["raw", "image"]).optional(),
+    pageCount: z.number().int().positive().optional(),
+});
+
+export const websiteSourceMetadataSchema = sourceMetadataCommonSchema.extend({
+    importedFrom: z.string().min(1).optional(),
+    sourceUrl: z.url({ protocol: /^https?$/ }).optional(),
+});
+
+export const youtubeSourceMetadataSchema = sourceMetadataCommonSchema.extend({
+    videoId: z.string().regex(/^[\w-]{11}$/).optional(),
+    transcriptSegments: z.array(transcriptSegmentSchema).optional(),
+});
+
+export const textSourceMetadataSchema = sourceMetadataCommonSchema;
+
+export const storedSourceMetadataSchema = sourceMetadataCommonSchema.extend({
+    fileUrl: z.url({ protocol: /^https?$/ }).optional(),
+    fileName: z.string().min(1).optional(),
+    fileSize: z.number().int().nonnegative().optional(),
+    publicId: z.string().min(1).optional(),
+    resourceType: z.enum(["raw", "image"]).optional(),
+    pageCount: z.number().int().positive().optional(),
+    importedFrom: z.string().min(1).optional(),
+    sourceUrl: z.url({ protocol: /^https?$/ }).optional(),
+    videoId: z.string().regex(/^[\w-]{11}$/).optional(),
+    transcriptSegments: z.array(transcriptSegmentSchema).optional(),
+});
+
+const sourceRecordBaseSchema = z.object({
+    id: z.string().min(1),
+    workspaceId: z.string().min(1),
+    title: z.string().min(1),
+    content: z.string().nullable(),
+    url: z.url({ protocol: /^https?$/ }).nullable(),
+    status: sourceStatusSchema,
+    createdAt: z.iso.datetime(),
+    updatedAt: z.iso.datetime(),
+});
+
+export const sourceSchema = z.discriminatedUnion("type", [
+    sourceRecordBaseSchema.extend({
+        type: z.literal("PDF"),
+        metadata: pdfSourceMetadataSchema.nullable(),
+    }),
+    sourceRecordBaseSchema.extend({
+        type: z.literal("WEBSITE"),
+        metadata: websiteSourceMetadataSchema.nullable(),
+    }),
+    sourceRecordBaseSchema.extend({
+        type: z.literal("YOUTUBE"),
+        metadata: youtubeSourceMetadataSchema.nullable(),
+    }),
+    sourceRecordBaseSchema.extend({
+        type: z.literal("TEXT"),
+        metadata: textSourceMetadataSchema.nullable(),
+    }),
+    sourceRecordBaseSchema.extend({
+        type: z.literal("MARKDOWN"),
+        metadata: textSourceMetadataSchema.nullable(),
+    }),
+]);
+
+export const sourceChunkMetadataSchema = z.object({
+    page: z.number().int().positive().optional(),
+    timestamp: z.number().finite().nonnegative().optional(),
+    endTimestamp: z.number().finite().nonnegative().optional(),
+});
+
+export const sourceChunkSchema = z.object({
+    id: z.string().min(1),
+    sourceId: z.string().min(1),
+    index: z.number().int().nonnegative(),
+    content: z.string(),
+    tokenCount: z.number().int().nonnegative().nullable(),
+    metadata: sourceChunkMetadataSchema.nullable(),
+    createdAt: z.iso.datetime(),
+});
+
+export const sourceChunksResponseSchema = z.object({
+    source: sourceSchema,
+    chunks: z.array(sourceChunkSchema),
+    count: z.number().int().nonnegative(),
+});
+
+export type Source = z.infer<typeof sourceSchema>;
+export type SourceChunk = z.infer<typeof sourceChunkSchema>;
+export type SourceChunkMetadata = z.infer<typeof sourceChunkMetadataSchema>;
+export type SourceChunksResponse = z.infer<typeof sourceChunksResponseSchema>;
+export type StoredSourceMetadata = z.infer<typeof storedSourceMetadataSchema>;
+export type TranscriptSegment = z.infer<typeof transcriptSegmentSchema>;
 
 export const apiErrorResponseSchema = z.object({
     error: z.object({
         code: z.string().min(1),
         message: z.string().min(1),
         requestId: z.string().min(1),
-        details: z.unknown().optional(),
+        details: z.json().optional(),
     }),
 });
 
 export type ApiErrorResponse = z.infer<typeof apiErrorResponseSchema>;
+export type JsonValue = z.infer<typeof z.json>;

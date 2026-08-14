@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import {
     BookOpenIcon,
     ExternalLinkIcon,
@@ -12,13 +11,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { useImportWebSearchSource } from "@/features/sources/hooks/use-sources";
 import { SOURCE_TYPE_LABELS } from "@/features/sources/lib/constants";
-import { sourceRoutes } from "@/features/sources/lib/routes";
+import { useNotebookUiStore } from "@/features/workspaces/stores/notebook-ui-store";
 import type { ChatCitation } from "../lib/types";
 
 type CitationPreviewProps = {
     citation: ChatCitation;
     workspaceId: string;
     markerIndex?: number;
+    citations?: ChatCitation[];
 };
 
 function SourceTypeIcon({ type }: { type: ChatCitation["kind"] extends "source" ? never : string }) {
@@ -38,8 +38,10 @@ export function CitationPreview({
     citation,
     workspaceId,
     markerIndex,
+    citations = [citation],
 }: CitationPreviewProps) {
     const importWebSearch = useImportWebSearchSource(workspaceId);
+    const openCitation = useNotebookUiStore((state) => state.openCitation);
     const sourceType = citation.kind === "web" ? "Web" : SOURCE_TYPE_LABELS[citation.sourceType];
 
     return (
@@ -100,13 +102,16 @@ export function CitationPreview({
                     </Button>
                 </div>
             ) : (
-                <Link
-                    href={sourceRoutes.detail(workspaceId, citation.sourceId)}
+                <button
+                    type="button"
+                    onClick={() => openCitation(workspaceId, citation, citations)}
                     className="inline-flex items-center gap-1.5 text-xs font-medium text-primary underline-offset-4 hover:underline"
                 >
                     <ExternalLinkIcon className="size-3" />
-                    Open source
-                </Link>
+                    {citation.availability && citation.availability !== "available"
+                        ? "View saved excerpt"
+                        : "Open source"}
+                </button>
             )}
         </div>
     );

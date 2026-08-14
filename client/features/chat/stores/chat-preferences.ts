@@ -87,6 +87,9 @@ export const useChatPreferences = create<ChatPreferencesState>()(
                     },
                 })),
         }),
-        { name: "chaibook-chat-preferences" },
+        {
+            name: "chaibook-chat-preferences",
+            skipHydration: true,
+        },
     ),
 );

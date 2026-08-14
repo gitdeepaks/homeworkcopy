@@ -67,4 +67,39 @@ describe("notebook UI store", () => {
         expect(view.sourcesCollapsed).toBe(false);
         expect(view.panelLayout.chat).toBe(50);
     });
+
+    test("opens and closes a citation without changing the chat draft", () => {
+        const state = useNotebookUiStore.getState();
+        state.setComposerDraft("notebook-a", "Keep this question");
+        state.openCitation(
+            "notebook-a",
+            {
+                kind: "source",
+                label: "1",
+                sourceId: "source-1",
+                sourceType: "TEXT",
+                title: "Notes",
+                excerpt: "Evidence",
+                chunkId: "chunk-1",
+                chunkIndex: 0,
+                provenance: { provider: "postgres" },
+            },
+            [],
+        );
+
+        let view = selectNotebookViewState(
+            useNotebookUiStore.getState(),
+            "notebook-a",
+        );
+        expect(view.activeSourceId).toBe("source-1");
+        expect(view.composerDraft).toBe("Keep this question");
+
+        useNotebookUiStore.getState().closeSourceViewer("notebook-a");
+        view = selectNotebookViewState(
+            useNotebookUiStore.getState(),
+            "notebook-a",
+        );
+        expect(view.activeSourceId).toBeNull();
+        expect(view.composerDraft).toBe("Keep this question");
+    });
 });

@@ -45,4 +45,47 @@ describe("citationEnvelopeSchema", () => {
 
         expect(result.success).toBe(false);
     });
+
+    test("preserves unavailable source citations", () => {
+        const result = citationEnvelopeSchema.parse({
+            version: 1,
+            items: [{
+                kind: "source",
+                label: "1",
+                sourceId: "deleted-source",
+                sourceType: "TEXT",
+                title: "Deleted notes",
+                excerpt: "Saved evidence",
+                chunkId: "deleted-chunk",
+                chunkIndex: 0,
+                availability: "source-unavailable",
+                provenance: { provider: "postgres" },
+            }],
+        });
+
+        expect(result.items[0]?.kind).toBe("source");
+        if (result.items[0]?.kind === "source") {
+            expect(result.items[0].availability).toBe("source-unavailable");
+        }
+    });
+
+    test("rejects duplicate display labels", () => {
+        const citation = {
+            kind: "source",
+            label: "1",
+            sourceId: "source-1",
+            sourceType: "TEXT",
+            title: "Notes",
+            excerpt: "Evidence",
+            chunkId: "chunk-1",
+            chunkIndex: 0,
+            provenance: { provider: "postgres" },
+        };
+        const result = citationEnvelopeSchema.safeParse({
+            version: 1,
+            items: [citation, citation],
+        });
+
+        expect(result.success).toBe(false);
+    });
 });

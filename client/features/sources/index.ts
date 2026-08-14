@@ -3,6 +3,8 @@ export type {
     ImportWebsiteInput,
     ImportYoutubeInput,
     Source,
+    SourceChunk,
+    SourceChunksResponse,
     SourceFilters,
     SourceStatus,
     SourceType,
@@ -12,6 +14,7 @@ export {
     createSource,
     deleteSource,
     getSource,
+    getSourceChunks,
     importWebsiteSource,
     importYoutubeSource,
     listSources,
@@ -33,6 +36,7 @@ export {
     useImportWebsiteSource,
     useImportYoutubeSource,
     useSource,
+    useSourceChunks,
     useSources,
     useUploadPdfSource,
 } from "./hooks/use-sources";
@@ -46,3 +50,4 @@ export { SourceSidebarList } from "./components/source-sidebar-list";
 export { SourcesPanel } from "./components/sources-panel";
 export { SourceStatusBadge } from "./components/source-status-badge";
 export { SourceTypeIcon } from "./components/source-type-icon";
+export { SourceViewer } from "./components/source-viewer";

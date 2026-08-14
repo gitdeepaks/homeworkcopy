@@ -48,10 +48,13 @@ import {
     deleteConversationRecord,
 } from "../repositories/conversation.repository.js";
 import {
+    createAssistantMessageWithValidatedCitations,
     createMessageRecord,
     countMessagesByConversationId,
     findMessagesByConversationId,
 } from "../repositories/message.repository.js";
+import { findExistingSourceIds } from "../repositories/source.repository.js";
+import { findExistingChunkIds } from "../repositories/source-chunk.repository.js";
 import { addMemoriesFromMessages, searchUserMemories } from "../lib/mem0.js";
 import {
     formatTavilyResultsForPrompt,
@@ -71,6 +74,8 @@ import { getWorkspaceByIdForUser } from "./workspace.service.js";
 import { resolveReadySourcesForWorkspace } from "./source.service.js";
 import {
     RETRIEVAL_VERSION,
+    citationEnvelopeSchema,
+    type Citation,
     type GroundingMode,
     type GroundingSnapshot,
     type SourceCitation,
@@ -142,7 +147,63 @@ export async function getConversationMessagesForWorkspace(
         throw new NotFoundError("Conversation not found");
     }
 
-    return findMessagesByConversationId(conversationId);
+    const messages = await findMessagesByConversationId(conversationId);
+    const parsedCitations = messages.map((message) =>
+        citationEnvelopeSchema.safeParse(message.citations),
+    );
+    const sourceIds = [
+        ...new Set(
+            parsedCitations.flatMap((parsed) =>
+                parsed.success
+                    ? parsed.data.items.flatMap((citation) =>
+                          citation.kind === "source" ? [citation.sourceId] : [],
+                      )
+                    : [],
+            ),
+        ),
+    ];
+    const chunkIds = [
+        ...new Set(
+            parsedCitations.flatMap((parsed) =>
+                parsed.success
+                    ? parsed.data.items.flatMap((citation) =>
+                          citation.kind === "source" && citation.chunkId
+                              ? [citation.chunkId]
+                              : [],
+                      )
+                    : [],
+            ),
+        ),
+    ];
+    const [existingSources, existingChunks] = await Promise.all([
+        findExistingSourceIds(workspaceId, sourceIds),
+        findExistingChunkIds(workspaceId, chunkIds),
+    ]);
+    const existingSourceIds = new Set(existingSources.map((source) => source.id));
+    const existingChunkIds = new Set(existingChunks.map((chunk) => chunk.id));
+
+    function withAvailability(citation: Citation): Citation {
+        if (citation.kind === "web") return citation;
+        if (!existingSourceIds.has(citation.sourceId)) {
+            return { ...citation, availability: "source-unavailable" };
+        }
+        if (citation.chunkId && !existingChunkIds.has(citation.chunkId)) {
+            return { ...citation, availability: "chunk-unavailable" };
+        }
+        return { ...citation, availability: "available" };
+    }
+
+    return messages.map((message, index) => {
+        const parsed = parsedCitations[index];
+        if (!parsed?.success) return message;
+        return {
+            ...message,
+            citations: {
+                version: 1,
+                items: parsed.data.items.map(withAvailability),
+            },
+        };
+    });
 }
 
 /**
@@ -320,6 +381,7 @@ export async function streamWorkspaceChat(
         chunkId: chunk.chunkId,
         chunkIndex: chunk.chunkIndex,
         ...(chunk.page === undefined ? {} : { page: chunk.page }),
+        ...(chunk.timestamp === undefined ? {} : { timestamp: chunk.timestamp }),
         provenance: { provider: chunk.retrievalProvider, score: chunk.score },
     }));
     const systemPrompt = buildChatSystemPrompt({
@@ -430,7 +492,7 @@ export async function streamWorkspaceChat(
                 "grounded response completed",
             );
 
-            await createMessageRecord({
+            await createAssistantMessageWithValidatedCitations(workspaceId, {
                 conversationId: conversation.id,
                 role: "ASSISTANT",
                 content: assistantText,

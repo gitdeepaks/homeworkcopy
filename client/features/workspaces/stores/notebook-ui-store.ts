@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
-import type { SourceSelectionMode } from "@homeworkcopy/contracts";
+import type { Citation, SourceSelectionMode } from "@homeworkcopy/contracts";
 
 export type NotebookTab = "sources" | "chat" | "studio";
 export const NOTEBOOK_TABS: readonly NotebookTab[] = [
@@ -25,8 +25,8 @@ type NotebookViewState = {
     sourceSelectionMode: SourceSelectionMode;
     selectedSourceIds: string[];
     activeSourceId: string | null;
-    activeCitationId: string | null;
-    sourceViewerLocation: string | null;
+    activeCitation: Citation | null;
+    citationSequence: Citation[];
     composerDraft: string;
     activeConversationId: string | null;
 };
@@ -45,12 +45,13 @@ type NotebookUiState = {
         mode: SourceSelectionMode,
     ) => void;
     setSelectedSourceIds: (notebookId: string, sourceIds: string[]) => void;
-    setActiveSource: (notebookId: string, sourceId: string | null) => void;
-    setActiveCitation: (
+    openSource: (notebookId: string, sourceId: string) => void;
+    openCitation: (
         notebookId: string,
-        citationId: string | null,
-        viewerLocation?: string | null,
+        citation: Citation,
+        sequence: Citation[],
     ) => void;
+    closeSourceViewer: (notebookId: string) => void;
     setComposerDraft: (notebookId: string, draft: string) => void;
     setActiveConversationId: (
         notebookId: string,
@@ -66,8 +67,8 @@ export const DEFAULT_NOTEBOOK_VIEW_STATE: NotebookViewState = {
     sourceSelectionMode: "all-ready",
     selectedSourceIds: [],
     activeSourceId: null,
-    activeCitationId: null,
-    sourceViewerLocation: null,
+    activeCitation: null,
+    citationSequence: [],
     composerDraft: "",
     activeConversationId: null,
 };
@@ -134,17 +135,31 @@ export const useNotebookUiStore = create<NotebookUiState>()(
                         selectedSourceIds: [...new Set(selectedSourceIds)],
                     }),
                 ),
-            setActiveSource: (notebookId, activeSourceId) =>
-                set((state) => updateNotebook(state, notebookId, { activeSourceId })),
-            setActiveCitation: (
-                notebookId,
-                activeCitationId,
-                sourceViewerLocation = null,
-            ) =>
+            openSource: (notebookId, activeSourceId) =>
                 set((state) =>
                     updateNotebook(state, notebookId, {
-                        activeCitationId,
-                        sourceViewerLocation,
+                        activeSourceId,
+                        activeCitation: null,
+                        citationSequence: [],
+                    }),
+                ),
+            openCitation: (notebookId, activeCitation, citationSequence) =>
+                set((state) =>
+                    updateNotebook(state, notebookId, {
+                        activeSourceId:
+                            activeCitation.kind === "source"
+                                ? activeCitation.sourceId
+                                : null,
+                        activeCitation,
+                        citationSequence,
+                    }),
+                ),
+            closeSourceViewer: (notebookId) =>
+                set((state) =>
+                    updateNotebook(state, notebookId, {
+                        activeSourceId: null,
+                        activeCitation: null,
+                        citationSequence: [],
                     }),
                 ),
             setComposerDraft: (notebookId, composerDraft) =>
@@ -172,8 +187,8 @@ export const useNotebookUiStore = create<NotebookUiState>()(
                             sourceSelectionMode: view.sourceSelectionMode,
                             selectedSourceIds: view.selectedSourceIds,
                             activeSourceId: null,
-                            activeCitationId: null,
-                            sourceViewerLocation: null,
+                            activeCitation: null,
+                            citationSequence: [],
                             composerDraft: "",
                             activeConversationId: null,
                         },

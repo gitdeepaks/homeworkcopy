@@ -26,7 +26,13 @@ export async function fetchYoutubeTranscript(url: string) {
 
     try {
         const segments = await YoutubeTranscript.fetchTranscript(videoId);
-        const content = segments.map((segment) => segment.text).join(" ").trim();
+        const transcriptSegments = segments.flatMap((segment) => {
+            const text = segment.text.trim();
+            return text
+                ? [{ text, offset: segment.offset, duration: segment.duration }]
+                : [];
+        });
+        const content = transcriptSegments.map((segment) => segment.text).join(" ").trim();
 
         if (!content) {
             throw new ValidationError(
@@ -34,7 +40,7 @@ export async function fetchYoutubeTranscript(url: string) {
             );
         }
 
-        return { videoId, content };
+        return { videoId, content, segments: transcriptSegments };
     } catch {
         throw new ValidationError(
             "Could not fetch transcript. The video may not have captions.",

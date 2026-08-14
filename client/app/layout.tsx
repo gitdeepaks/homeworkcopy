@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Script from "next/script";
 import { ClerkProvider } from "@clerk/nextjs";
 import { Caveat, JetBrains_Mono, Source_Sans_3 } from "next/font/google";
 import "./globals.css";
@@ -47,17 +48,17 @@ export default function RootLayout({
       )}
       suppressHydrationWarning
     >
+      <head>
+        <Script id="theme-initializer" strategy="beforeInteractive">
+          {`try{var t=localStorage.getItem("theme");var d=t==="dark"||(t===null||t==="system")&&matchMedia("(prefers-color-scheme: dark)").matches;document.documentElement.classList.toggle("dark",d);document.documentElement.style.colorScheme=d?"dark":"light"}catch(e){}`}
+        </Script>
+      </head>
       <body className="flex min-h-full flex-col">
         <a className="skip-link" href="#main-content">
           Skip to main content
         </a>
         <ClerkProvider>
-          <ThemeProvider
-            attribute="class"
-            defaultTheme="system"
-            enableSystem
-            disableTransitionOnChange
-          >
+          <ThemeProvider defaultTheme="system">
             <AuthenticatedApiProvider>
               <QueryProvider>{children}</QueryProvider>
             </AuthenticatedApiProvider>

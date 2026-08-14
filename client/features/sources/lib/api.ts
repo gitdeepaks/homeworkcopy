@@ -1,11 +1,14 @@
-import { ApiError, apiFetch, apiFetchVoid, authenticatedFetch } from "@/shared/lib/api";
-import { apiErrorResponseSchema } from "@homeworkcopy/contracts";
+import { ApiError, apiFetch, apiFetchVoid, apiFetchWithSchema, authenticatedFetch } from "@/shared/lib/api";
+import {
+    apiErrorResponseSchema,
+    sourceChunksResponseSchema,
+    sourceSchema,
+} from "@homeworkcopy/contracts";
+import { z } from "zod";
 import type {
     CreateSourceInput,
     ImportWebsiteInput,
     ImportYoutubeInput,
-    Source,
-    SourceChunksResponse,
     SourceFilters,
 } from "./types";
 
@@ -29,34 +32,44 @@ function buildSourcesPath(workspaceId: string, filters?: SourceFilters) {
 }
 
 export function listSources(workspaceId: string, filters?: SourceFilters) {
-    return apiFetch<Source[]>(buildSourcesPath(workspaceId, filters));
+    return apiFetchWithSchema(
+        buildSourcesPath(workspaceId, filters),
+        z.array(sourceSchema),
+    );
 }
 
 export function getSource(workspaceId: string, sourceId: string) {
-    return apiFetch<Source>(
+    return apiFetchWithSchema(
         `/api/workspaces/${workspaceId}/sources/${sourceId}`,
+        sourceSchema,
     );
 }
 
 export function getSourceChunks(workspaceId: string, sourceId: string) {
-    return apiFetch<SourceChunksResponse>(
+    return apiFetchWithSchema(
         `/api/workspaces/${workspaceId}/sources/${sourceId}/chunks`,
+        sourceChunksResponseSchema,
     );
 }
 
 export function createSource(workspaceId: string, input: CreateSourceInput) {
-    return apiFetch<Source>(`/api/workspaces/${workspaceId}/sources`, {
-        method: "POST",
-        body: JSON.stringify(input),
-    });
+    return apiFetchWithSchema(
+        `/api/workspaces/${workspaceId}/sources`,
+        sourceSchema,
+        {
+            method: "POST",
+            body: JSON.stringify(input),
+        },
+    );
 }
 
 export function importWebsiteSource(
     workspaceId: string,
     input: ImportWebsiteInput,
 ) {
-    return apiFetch<Source>(
+    return apiFetchWithSchema(
         `/api/workspaces/${workspaceId}/sources/import/website`,
+        sourceSchema,
         {
             method: "POST",
             body: JSON.stringify(input),
@@ -68,8 +81,9 @@ export function importYoutubeSource(
     workspaceId: string,
     input: ImportYoutubeInput,
 ) {
-    return apiFetch<Source>(
+    return apiFetchWithSchema(
         `/api/workspaces/${workspaceId}/sources/import/youtube`,
+        sourceSchema,
         {
             method: "POST",
             body: JSON.stringify(input),
@@ -105,7 +119,7 @@ export async function uploadPdfSource(
         throw new ApiError(response.status, parsed.success ? parsed.data.error.message : "Upload failed", parsed.success ? parsed.data.error.details : undefined);
     }
 
-    return data;
+    return sourceSchema.parse(data);
 }
 
 export function deleteSource(workspaceId: string, sourceId: string) {
@@ -151,8 +165,9 @@ export function importWebSearchSource(
     workspaceId: string,
     input: { title: string; content: string; url: string },
 ) {
-    return apiFetch<Source>(
+    return apiFetchWithSchema(
         `/api/workspaces/${workspaceId}/sources/import/web-search`,
+        sourceSchema,
         {
             method: "POST",
             body: JSON.stringify(input),

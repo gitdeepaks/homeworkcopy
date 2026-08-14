@@ -6,6 +6,7 @@ import {
     HoverCardTrigger,
 } from "@/components/ui/hover-card";
 import type { ChatCitation } from "../lib/types";
+import { useNotebookUiStore } from "@/features/workspaces/stores/notebook-ui-store";
 import { CitationPreview } from "./citation-preview";
 
 type CitationMarkerProps = {
@@ -13,6 +14,7 @@ type CitationMarkerProps = {
     citation: ChatCitation;
     workspaceId: string;
     prefix?: string;
+    citations: ChatCitation[];
 };
 
 export function CitationMarker({
@@ -20,8 +22,14 @@ export function CitationMarker({
     citation,
     workspaceId,
     prefix,
+    citations,
 }: CitationMarkerProps) {
     const label = prefix ? `${prefix}${index}` : String(index);
+    const openCitation = useNotebookUiStore((state) => state.openCitation);
+    const unavailable =
+        citation.kind === "source" &&
+        citation.availability !== undefined &&
+        citation.availability !== "available";
 
     return (
         <HoverCard>
@@ -32,7 +40,11 @@ export function CitationMarker({
                     <button
                         type="button"
                         className="mx-0.5 inline-flex h-5 min-w-5 -translate-y-1 items-center justify-center border-b-2 border-primary bg-highlighter px-1 align-middle font-mono text-[10px] font-bold text-primary transition-colors hover:bg-highlighter/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-                        aria-label={`Source ${label}: ${citation.title}`}
+                        aria-label={`${unavailable ? "Unavailable citation" : "Source"} ${label}: ${citation.title}`}
+                        aria-haspopup="dialog"
+                        onClick={() =>
+                            openCitation(workspaceId, citation, citations)
+                        }
                     >
                         {label}
                     </button>
@@ -43,6 +55,7 @@ export function CitationMarker({
                     citation={citation}
                     workspaceId={workspaceId}
                     markerIndex={index}
+                    citations={citations}
                 />
             </HoverCardContent>
         </HoverCard>

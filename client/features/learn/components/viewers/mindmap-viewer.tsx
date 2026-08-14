@@ -9,7 +9,7 @@ import {
     useState,
 } from "react";
 import Link from "next/link";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/shared/components/providers/theme-provider";
 import {
     Background,
     Controls,

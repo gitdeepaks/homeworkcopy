@@ -1,19 +1,12 @@
-import type { SourceStatus, SourceType } from "@homeworkcopy/contracts";
+import type {
+    Source,
+    SourceChunk,
+    SourceChunksResponse,
+    SourceStatus,
+    SourceType,
+} from "@homeworkcopy/contracts";
 
-export type { SourceStatus, SourceType };
-
-export type Source = {
-    id: string;
-    workspaceId: string;
-    type: SourceType;
-    title: string;
-    content: string | null;
-    url: string | null;
-    status: SourceStatus;
-    metadata: Record<string, unknown> | null;
-    createdAt: string;
-    updatedAt: string;
-};
+export type { Source, SourceChunk, SourceChunksResponse, SourceStatus, SourceType };
 
 export type SourceFilters = {
     q?: string;
@@ -45,19 +38,4 @@ export type ImportWebsiteInput = {
 export type ImportYoutubeInput = {
     url: string;
     title?: string;
-};
-
-export type SourceChunk = {
-    id: string;
-    sourceId: string;
-    index: number;
-    content: string;
-    tokenCount: number | null;
-    metadata: Record<string, unknown> | null;
-    createdAt: string;
-};
-
-export type SourceChunksResponse = {
-    chunks: SourceChunk[];
-    count: number;
 };
