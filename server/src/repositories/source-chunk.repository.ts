@@ -34,20 +34,16 @@ export function createSourceChunks(chunks: CreateSourceChunkData[]) {
         return Promise.resolve([]);
     }
 
-    return prisma.$transaction(
-        chunks.map((chunk) =>
-            prisma.sourceChunk.create({
-                data: {
-                    sourceId: chunk.sourceId,
-                    index: chunk.index,
-                    content: chunk.content,
-                    tokenCount: chunk.tokenCount ?? null,
-                    metadata: chunk.metadata,
-                },
-                select: sourceChunkSelect,
-            }),
-        ),
-    );
+    return prisma.sourceChunk.createManyAndReturn({
+        data: chunks.map((chunk) => ({
+            sourceId: chunk.sourceId,
+            index: chunk.index,
+            content: chunk.content,
+            tokenCount: chunk.tokenCount ?? null,
+            metadata: chunk.metadata,
+        })),
+        select: sourceChunkSelect,
+    });
 }
 
 export function findChunksBySourceId(sourceId: string) {

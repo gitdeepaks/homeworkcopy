@@ -9,6 +9,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
     BotIcon,
     DownloadIcon,
+    Loader2Icon,
     MessageSquarePlusIcon,
     Trash2Icon,
 } from "lucide-react";
@@ -214,6 +215,8 @@ export function WorkspaceChat({
     });
 
     const isStreaming = status === "streaming" || status === "submitted";
+    const showPendingAssistant =
+        status === "submitted" && messages.at(-1)?.role === "user";
 
     useEffect(() => {
         if (!conversationId) {
@@ -383,7 +386,8 @@ export function WorkspaceChat({
                 <MessageScroller className="min-h-0 flex-1">
                     <MessageScrollerViewport>
                         <MessageScrollerContent className="mx-auto w-full max-w-3xl px-4 py-6">
-                            {conversationsLoading || messagesLoading ? (
+                            {(conversationsLoading || messagesLoading) &&
+                            messages.length === 0 ? (
                                 <div className="space-y-4">
                                     <Skeleton className="h-16 w-2/3 rounded-3xl" />
                                     <Skeleton className="ml-auto h-16 w-1/2 rounded-3xl" />
@@ -493,6 +497,26 @@ export function WorkspaceChat({
                                             </MessageScrollerItem>
                                         );
                                     })}
+                                    {showPendingAssistant ? (
+                                        <MessageScrollerItem scrollAnchor>
+                                            <Message align="start">
+                                                <MessageAvatar className="size-8">
+                                                    <BotIcon className="size-4" />
+                                                </MessageAvatar>
+                                                <MessageContent>
+                                                    <Bubble
+                                                        align="start"
+                                                        variant="ghost"
+                                                    >
+                                                        <BubbleContent className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+                                                            <Loader2Icon className="size-4 animate-spin" />
+                                                            Searching your selected sources…
+                                                        </BubbleContent>
+                                                    </Bubble>
+                                                </MessageContent>
+                                            </Message>
+                                        </MessageScrollerItem>
+                                    ) : null}
                                 </MessageGroup>
                             )}
                         </MessageScrollerContent>

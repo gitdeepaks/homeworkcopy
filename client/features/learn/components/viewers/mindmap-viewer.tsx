@@ -9,6 +9,7 @@ import {
     useState,
 } from "react";
 import Link from "next/link";
+import { useTheme } from "next-themes";
 import {
     Background,
     Controls,
@@ -356,6 +357,7 @@ type MindMapCanvasProps = {
 };
 
 function MindMapCanvas({ nodes, edges, workspaceId }: MindMapCanvasProps) {
+    const { resolvedTheme } = useTheme();
     const tree = useMemo(() => buildTree(nodes, edges), [nodes, edges]);
     const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
     const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -540,12 +542,12 @@ function MindMapCanvas({ nodes, edges, workspaceId }: MindMapCanvasProps) {
                     </div>
                 </div>
 
-                <div className="relative min-h-0 flex-1">
+                <div className="relative min-h-0 flex-1 bg-background">
                     <ReactFlow
                         nodes={flowNodes}
                         edges={flowEdges}
                         nodeTypes={nodeTypes}
-                        colorMode="dark"
+                        colorMode={resolvedTheme === "dark" ? "dark" : "light"}
                         fitView
                         fitViewOptions={{ padding: 0.2 }}
                         minZoom={0.15}
@@ -628,7 +630,7 @@ export function MindMapViewer({
 
     const containerClass = fullscreen
         ? "fixed inset-0 z-50 flex flex-col bg-background"
-        : `flex min-h-[min(74vh,780px)] flex-col overflow-hidden rounded-3xl border bg-muted/20 ${className ?? ""}`;
+        : `flex h-[min(74vh,780px)] min-h-[28rem] flex-col overflow-hidden rounded-3xl border bg-background ${className ?? ""}`;
 
     return (
         <div className={containerClass}>

@@ -76,26 +76,50 @@ function mergeSplits(splits: string[], separator: string, chunkSize: number) {
  * @returns Array of non-empty chunk strings (no `index` or `metadata` yet)
  *
  */
-function splitText(text: string, chunkSize: number, chunkOverlap: number) {
-    const chunks: string[] = [];
-
-    for (const separator of SEPARATORS) {
-        if (separator) {
-            const splits = text.split(separator).filter(Boolean);
-            if (splits.length === 1) {
-                continue;
-            }
-            chunks.push(...mergeSplits(splits, separator, chunkSize));
-        } else {
-            for (let i = 0; i < text.length; i += chunkSize - chunkOverlap) {
-                chunks.push(text.slice(i, i + chunkSize));
-            }
-        }
-
-        if (chunks.length > 0) {
-            break;
-        }
+function splitText(
+    text: string,
+    chunkSize: number,
+    chunkOverlap: number,
+    separators = SEPARATORS,
+): string[] {
+    if (text.length <= chunkSize) {
+        return text.trim() ? [text] : [];
     }
+
+    const [separator = "", ...remainingSeparators] = separators;
+
+    if (!separator) {
+        const chunks: string[] = [];
+        for (let i = 0; i < text.length; i += chunkSize - chunkOverlap) {
+            chunks.push(text.slice(i, i + chunkSize));
+        }
+        return chunks.filter((chunk) => chunk.trim().length > 0);
+    }
+
+    const splits = text.split(separator).filter(Boolean);
+    if (splits.length === 1) {
+        return splitText(text, chunkSize, chunkOverlap, remainingSeparators);
+    }
+
+    const chunks: string[] = [];
+    let mergeable: string[] = [];
+    const flushMergeable = () => {
+        chunks.push(...mergeSplits(mergeable, separator, chunkSize));
+        mergeable = [];
+    };
+
+    for (const split of splits) {
+        if (split.length <= chunkSize) {
+            mergeable.push(split);
+            continue;
+        }
+
+        flushMergeable();
+        chunks.push(
+            ...splitText(split, chunkSize, chunkOverlap, remainingSeparators),
+        );
+    }
+    flushMergeable();
 
     return chunks.filter((chunk) => chunk.trim().length > 0);
 }

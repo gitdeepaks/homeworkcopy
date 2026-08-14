@@ -21,6 +21,7 @@ import {
     createUIMessageStream,
     isStepCount,
     pipeUIMessageStreamToResponse,
+    smoothStream,
     streamText,
     toUIMessageStream,
     tool,
@@ -388,6 +389,7 @@ export async function streamWorkspaceChat(
                 messages: await convertToModelMessages(contextMessages),
                 tools,
                 stopWhen: webSearchEnabled ? isStepCount(3) : undefined,
+                experimental_transform: smoothStream(),
             });
 
             writer.merge(toUIMessageStream({ stream: result.stream }));
@@ -479,6 +481,9 @@ export async function streamWorkspaceChat(
         stream,
         headers: {
             "X-Conversation-Id": conversation.id,
+            "Content-Encoding": "none",
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
         },
     });
 }
