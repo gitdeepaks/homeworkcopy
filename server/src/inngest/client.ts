@@ -11,7 +11,7 @@ export type SourceCreatedEvent = {
 
 export type ArtifactGenerateEvent = {
     name: "artifact/generate";
-    data: { artifactId: string; workspaceId: string };
+    data: { artifactId: string; workspaceId: string; attempt?: number };
 };
 
 export type ConversationSummarizeEvent = {

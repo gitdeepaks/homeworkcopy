@@ -97,14 +97,19 @@ export const generateArtifact = inngest.createFunction(
   {
     id: "generate-artifact",
     retries: 2,
+    concurrency: { limit: 5, key: "event.data.workspaceId" },
     triggers: [{ event: "artifact/generate" }],
   },
   async ({ event, step }) => {
     const { artifactId } = event.data;
+    // Outputs queued before Phase 7 carried no attempt number.
+    const attempt = event.data.attempt ?? 1;
 
-    await step.run("generate", () => processArtifactById(artifactId));
+    const result = await step.run("generate", () =>
+      processArtifactById(artifactId, attempt),
+    );
 
-    return { artifactId, status: "READY" };
+    return { artifactId, attempt, ...result };
   },
 );
 

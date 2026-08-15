@@ -7,8 +7,11 @@ export const artifactSelect = {
     type: true,
     title: true,
     content: true,
+    contentVersion: true,
     sourceIds: true,
     status: true,
+    attemptCount: true,
+    cancelledAt: true,
     metadata: true,
     createdAt: true,
     updatedAt: true,
@@ -24,9 +27,14 @@ export type CreateArtifactData = {
     title: string;
     sourceIds: string[];
     status?: ArtifactRecord["status"];
+    attemptCount?: number;
+    contentVersion?: number;
     content?: Prisma.InputJsonValue;
     metadata?: Prisma.InputJsonValue;
 };
+
+/** Statuses a generation worker may take over for a given attempt. */
+const CLAIMABLE_STATUSES = ["PENDING", "PROCESSING", "FAILED"] as const;
 
 export function findArtifactsByWorkspaceId(workspaceId: string) {
     return prisma.learningArtifact.findMany({
@@ -54,6 +62,8 @@ export function createArtifactRecord(data: CreateArtifactData) {
             title: data.title,
             sourceIds: data.sourceIds,
             status: data.status ?? "PENDING",
+            attemptCount: data.attemptCount ?? 0,
+            contentVersion: data.contentVersion ?? 1,
             content: data.content,
             metadata: data.metadata,
         },
@@ -66,6 +76,7 @@ export function updateArtifactRecord(
     data: {
         title?: string;
         content?: Prisma.InputJsonValue;
+        contentVersion?: number;
         status?: ArtifactRecord["status"];
         metadata?: Prisma.InputJsonValue;
     },
@@ -75,6 +86,100 @@ export function updateArtifactRecord(
         data,
         select: artifactSelect,
     });
+}
+
+/**
+ * Starts a new generation attempt, invalidating any job still running for the
+ * previous attempt.
+ *
+ * @param artifactId - Output to requeue
+ * @param metadata - Metadata to write alongside the reset, when supplied
+ * @returns The updated record, including its new attempt number
+ */
+export function startArtifactAttempt(
+    artifactId: string,
+    metadata?: Prisma.InputJsonValue,
+) {
+    return prisma.learningArtifact.update({
+        where: { id: artifactId },
+        data: {
+            status: "PENDING",
+            cancelledAt: null,
+            attemptCount: { increment: 1 },
+            ...(metadata === undefined ? {} : { metadata }),
+        },
+        select: artifactSelect,
+    });
+}
+
+/**
+ * Cancels an output that has not finished generating.
+ *
+ * The attempt counter is bumped so an in-flight worker cannot write results
+ * after the cancellation.
+ *
+ * @param artifactId - Output to cancel
+ * @returns Number of rows cancelled (`0` when it already reached a final state)
+ */
+export async function cancelArtifactRecord(artifactId: string) {
+    const result = await prisma.learningArtifact.updateMany({
+        where: { id: artifactId, status: { in: ["PENDING", "PROCESSING"] } },
+        data: {
+            status: "CANCELLED",
+            cancelledAt: new Date(),
+            attemptCount: { increment: 1 },
+        },
+    });
+    return result.count;
+}
+
+/**
+ * Atomically marks an output as generating for one specific attempt.
+ *
+ * @param artifactId - Output being generated
+ * @param attempt - Attempt number carried by the job event
+ * @returns `true` when this worker owns the attempt, `false` when it is stale
+ */
+export async function claimArtifactGeneration(
+    artifactId: string,
+    attempt: number,
+) {
+    const result = await prisma.learningArtifact.updateMany({
+        where: {
+            id: artifactId,
+            attemptCount: attempt,
+            cancelledAt: null,
+            status: { in: [...CLAIMABLE_STATUSES] },
+        },
+        data: { status: "PROCESSING" },
+    });
+    return result.count === 1;
+}
+
+/**
+ * Writes a terminal generation result, but only while this attempt is still the
+ * current one.
+ *
+ * @param artifactId - Output being finalized
+ * @param attempt - Attempt number the result belongs to
+ * @param data - Status, content, and metadata to persist
+ * @returns `true` when the result was stored, `false` when it was superseded
+ */
+export async function finalizeArtifactGeneration(
+    artifactId: string,
+    attempt: number,
+    data: {
+        status: ArtifactRecord["status"];
+        content?: Prisma.InputJsonValue;
+        contentVersion?: number;
+        metadata: Prisma.InputJsonValue;
+    },
+) {
+    const result = await prisma.learningArtifact.updateMany({
+        where: { id: artifactId, attemptCount: attempt, cancelledAt: null },
+        data,
+    });
+    return result.count === 1;
 }
 
 export async function deleteArtifactRecord(artifactId: string) {

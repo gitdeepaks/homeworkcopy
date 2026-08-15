@@ -12,6 +12,7 @@ import {
     getChatGuide,
 } from "../lib/api";
 import type { MessageFeedback, SourceSelection } from "@homeworkcopy/contracts";
+import { outputKeys } from "@/features/studio/hooks/use-outputs";
 
 export function chatKeys(workspaceId: string) {
     return {
@@ -105,6 +106,8 @@ export function useMessageFeedback(workspaceId: string) {
 }
 
 export function useSaveMessageAsOutput(workspaceId: string) {
+    const queryClient = useQueryClient();
+
     return useMutation({
         mutationFn: (input: { conversationId: string; messageId: string }) =>
             saveMessageAsOutput(
@@ -112,6 +115,11 @@ export function useSaveMessageAsOutput(workspaceId: string) {
                 input.conversationId,
                 input.messageId,
             ),
+        // The saved answer appears immediately on the Studio shelf.
+        onSuccess: () =>
+            queryClient.invalidateQueries({
+                queryKey: outputKeys(workspaceId).all,
+            }),
     });
 }
 

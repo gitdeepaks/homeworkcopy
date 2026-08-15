@@ -89,7 +89,12 @@ import {
     CHAT_WEB_QUERY_MAX_LENGTH,
     type ChatTrigger,
     type MessageFeedback,
+    OUTPUT_CONTENT_VERSION,
+    OUTPUT_METADATA_VERSION,
+    summaryOutputContentSchema,
+    type OutputMetadata,
 } from "@homeworkcopy/contracts";
+import { toPrismaJson } from "../utils/prisma-json.js";
 import { logger } from "../lib/logger.js";
 import {
     reconcileChatQuota,
@@ -299,24 +304,36 @@ export async function saveMessageAsOutputForWorkspace(
             (candidate.id === messageId || candidate.clientMessageId === messageId),
     );
     if (!message) throw new NotFoundError("Answer not found");
+
+    const content = summaryOutputContentSchema.safeParse({
+        markdown: message.content,
+    });
+    if (!content.success) {
+        throw new ValidationError("This answer has no text to save.");
+    }
+
     const grounding = citationEnvelopeSchema.safeParse(message.citations);
     const sourceIds = grounding.success
         ? [...new Set(grounding.data.items.flatMap((citation) =>
               citation.kind === "source" ? [citation.sourceId] : [],
           ))]
         : [];
+    const metadata: OutputMetadata = {
+        version: OUTPUT_METADATA_VERSION,
+        generatedAt: new Date().toISOString(),
+        savedFrom: { conversationId, messageId: message.id },
+    };
+
     return createArtifactRecord({
         workspaceId,
         type: "SUMMARY",
         title: `Saved answer · ${new Date().toLocaleDateString()}`,
         sourceIds,
         status: "READY",
-        content: { markdown: message.content },
-        metadata: {
-            savedFromConversationId: conversationId,
-            savedFromMessageId: message.id,
-            generatedAt: new Date().toISOString(),
-        },
+        attemptCount: 1,
+        contentVersion: OUTPUT_CONTENT_VERSION,
+        content: toPrismaJson(content.data),
+        metadata: toPrismaJson(metadata),
     });
 }
 

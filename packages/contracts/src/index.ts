@@ -357,3 +357,487 @@ export const apiErrorResponseSchema = z.object({
 
 export type ApiErrorResponse = z.infer<typeof apiErrorResponseSchema>;
 export type JsonValue = z.infer<typeof z.json>;
+
+/**
+ * JSON as read back from a database driver or `JSON.parse`, where object
+ * members may be absent. Use it for values that are about to be validated.
+ */
+export type JsonReadValue =
+    | string
+    | number
+    | boolean
+    | null
+    | readonly JsonReadValue[]
+    | { readonly [key: string]: JsonReadValue | undefined };
+
+/* -------------------------------------------------------------------------- */
+/*                              Studio outputs                                */
+/* -------------------------------------------------------------------------- */
+
+export const OUTPUT_TITLE_MAX_LENGTH = 120;
+export const OUTPUT_FOCUS_MAX_LENGTH = 500;
+export const OUTPUT_CONTENT_VERSION = 1;
+export const OUTPUT_METADATA_VERSION = 1;
+export const OUTPUT_MAX_GENERATION_ATTEMPTS = 3;
+
+export const outputTypeSchema = z.enum([
+    "SUMMARY",
+    "TAKEAWAYS",
+    "FLASHCARDS",
+    "QUIZ",
+    "MINDMAP",
+    "REPORT",
+    "STUDY_GUIDE",
+    "FAQ",
+    "TIMELINE",
+    "BRIEFING",
+]);
+
+export const outputStatusSchema = z.enum([
+    "PENDING",
+    "PROCESSING",
+    "READY",
+    "FAILED",
+    "CANCELLED",
+]);
+
+export const outputGroupSchema = z.enum([
+    "featured-media",
+    "study",
+    "writing",
+    "saved",
+]);
+
+export type OutputType = z.infer<typeof outputTypeSchema>;
+export type OutputStatus = z.infer<typeof outputStatusSchema>;
+export type OutputGroup = z.infer<typeof outputGroupSchema>;
+
+/** Studio shelf each output type belongs to before saved-output overrides. */
+export const OUTPUT_TYPE_GROUP: Record<OutputType, OutputGroup> = {
+    SUMMARY: "writing",
+    TAKEAWAYS: "study",
+    FLASHCARDS: "study",
+    QUIZ: "study",
+    MINDMAP: "study",
+    REPORT: "writing",
+    STUDY_GUIDE: "study",
+    FAQ: "writing",
+    TIMELINE: "writing",
+    BRIEFING: "writing",
+};
+
+export const OUTPUT_TYPES: readonly OutputType[] = outputTypeSchema.options;
+
+export const outputLengthSchema = z.enum(["short", "standard", "deep"]);
+export const outputLocaleSchema = z
+    .string()
+    .trim()
+    .regex(/^[a-z]{2}(?:-[A-Z]{2})?$/, "Use a language code such as en or en-GB");
+
+export type OutputLength = z.infer<typeof outputLengthSchema>;
+
+const outputFocusSchema = z
+    .string()
+    .trim()
+    .min(1)
+    .max(OUTPUT_FOCUS_MAX_LENGTH);
+
+/** Client-supplied generation options; defaults are applied on parse. */
+export const outputGenerationOptionsInputSchema = z.object({
+    length: outputLengthSchema.default("standard"),
+    locale: outputLocaleSchema.default("en"),
+    focus: outputFocusSchema.optional(),
+});
+
+/** Persisted, versioned generation options snapshot. */
+export const outputGenerationOptionsSchema = z.object({
+    version: z.literal(1),
+    length: outputLengthSchema,
+    locale: outputLocaleSchema,
+    focus: outputFocusSchema.optional(),
+});
+
+export type OutputGenerationOptionsInput = z.infer<
+    typeof outputGenerationOptionsInputSchema
+>;
+/** Options as sent by a client, before defaults are applied. */
+export type OutputGenerationOptionsRequest = z.input<
+    typeof outputGenerationOptionsInputSchema
+>;
+export type OutputGenerationOptions = z.infer<
+    typeof outputGenerationOptionsSchema
+>;
+
+export const createOutputRequestSchema = z.intersection(
+    z.object({
+        type: outputTypeSchema,
+        title: z.string().trim().min(1).max(OUTPUT_TITLE_MAX_LENGTH).optional(),
+        options: outputGenerationOptionsInputSchema.optional(),
+    }),
+    sourceSelectionSchema,
+);
+
+export const renameOutputRequestSchema = z.object({
+    title: z.string().trim().min(1).max(OUTPUT_TITLE_MAX_LENGTH),
+});
+
+export type CreateOutputRequest = z.infer<typeof createOutputRequestSchema>;
+export type RenameOutputRequest = z.infer<typeof renameOutputRequestSchema>;
+
+export const outputSourceSnapshotSchema = z.object({
+    version: z.literal(1),
+    capturedAt: z.iso.datetime(),
+    selectionMode: sourceSelectionModeSchema,
+    sources: z
+        .array(
+            z.object({
+                id: z.string().min(1),
+                title: z.string().min(1),
+                type: sourceTypeSchema,
+                processingVersion: z.number().int().positive(),
+            }),
+        )
+        .min(1),
+});
+
+export const outputFailureStageSchema = z.enum([
+    "SOURCE_RESOLUTION",
+    "CONTEXT_ASSEMBLY",
+    "GENERATION",
+    "VALIDATION",
+]);
+
+export const outputFailureCodeSchema = z.enum([
+    "SOURCES_UNAVAILABLE",
+    "NO_SOURCE_CONTENT",
+    "GENERATION_FAILED",
+    "INVALID_MODEL_OUTPUT",
+    "UNSUPPORTED_OUTPUT_TYPE",
+]);
+
+/**
+ * Inline marker a generated writing output may use to attribute a statement to
+ * one of its sources, e.g. `[S1]`.
+ */
+export const outputSourceLabelSchema = z.object({
+    label: z.string().regex(/^S[1-9]\d*$/),
+    sourceId: z.string().min(1),
+    title: z.string().min(1),
+});
+
+export const outputMetricsSchema = z.object({
+    contextChars: z.number().int().nonnegative(),
+    durationMs: z.number().int().nonnegative(),
+    attempts: z.number().int().positive(),
+    /** Absent when a failure stopped generation before the count was known. */
+    repairAttempts: z.number().int().nonnegative().optional(),
+});
+
+export const outputMetadataSchema = z.object({
+    version: z.literal(OUTPUT_METADATA_VERSION),
+    generatedAt: z.iso.datetime().optional(),
+    provider: z.literal("openai").optional(),
+    model: z.string().min(1).optional(),
+    options: outputGenerationOptionsSchema.optional(),
+    sourceSnapshot: outputSourceSnapshotSchema.optional(),
+    sourceLabels: z.array(outputSourceLabelSchema).optional(),
+    metrics: outputMetricsSchema.optional(),
+    failure: z
+        .object({
+            stage: outputFailureStageSchema,
+            code: outputFailureCodeSchema,
+            message: z.string().min(1),
+        })
+        .optional(),
+    savedFrom: z
+        .object({
+            conversationId: z.string().min(1),
+            messageId: z.string().min(1),
+        })
+        .optional(),
+    duplicatedFromOutputId: z.string().min(1).optional(),
+});
+
+/**
+ * Metadata written before Phase 7 introduced the versioned envelope. Kept so
+ * existing outputs still render their failure reason and saved-answer origin.
+ */
+const legacyOutputMetadataSchema = z.object({
+    processingError: z.string().min(1).optional(),
+    generatedAt: z.string().min(1).optional(),
+    savedFromConversationId: z.string().min(1).optional(),
+    savedFromMessageId: z.string().min(1).optional(),
+});
+
+export type OutputSourceSnapshot = z.infer<typeof outputSourceSnapshotSchema>;
+export type OutputSourceLabel = z.infer<typeof outputSourceLabelSchema>;
+export type OutputFailureStage = z.infer<typeof outputFailureStageSchema>;
+export type OutputFailureCode = z.infer<typeof outputFailureCodeSchema>;
+export type OutputMetrics = z.infer<typeof outputMetricsSchema>;
+export type OutputMetadata = z.infer<typeof outputMetadataSchema>;
+
+/**
+ * Reads persisted output metadata, upgrading pre-Phase-7 records in memory so
+ * readers never have to branch on record age.
+ *
+ * @param value - Raw `metadata` JSON column value
+ * @returns Versioned metadata, or `null` when the column holds nothing usable
+ */
+export function readOutputMetadata(
+    value: JsonReadValue | undefined,
+): OutputMetadata | null {
+    if (value === null || value === undefined) {
+        return null;
+    }
+
+    const versioned = outputMetadataSchema.safeParse(value);
+    if (versioned.success) {
+        return versioned.data;
+    }
+
+    const legacy = legacyOutputMetadataSchema.safeParse(value);
+    if (!legacy.success) {
+        return null;
+    }
+
+    const { processingError, savedFromConversationId, savedFromMessageId } =
+        legacy.data;
+
+    return {
+        version: OUTPUT_METADATA_VERSION,
+        ...(processingError
+            ? {
+                  failure: {
+                      stage: outputFailureStageSchema.enum.GENERATION,
+                      code: outputFailureCodeSchema.enum.GENERATION_FAILED,
+                      message: processingError,
+                  },
+              }
+            : {}),
+        ...(savedFromConversationId && savedFromMessageId
+            ? {
+                  savedFrom: {
+                      conversationId: savedFromConversationId,
+                      messageId: savedFromMessageId,
+                  },
+              }
+            : {}),
+    };
+}
+
+/* ----------------------------- Output content ----------------------------- */
+
+export const summaryOutputContentSchema = z.object({
+    markdown: z.string().trim().min(1),
+});
+
+export const takeawaysOutputContentSchema = z.object({
+    items: z.array(z.string().trim().min(1)).min(3).max(20),
+});
+
+export const flashcardsOutputContentSchema = z.object({
+    cards: z
+        .array(
+            z.object({
+                front: z.string().trim().min(1),
+                back: z.string().trim().min(1),
+            }),
+        )
+        .min(3)
+        .max(30),
+});
+
+export const quizOutputContentSchema = z.object({
+    questions: z
+        .array(
+            z
+                .object({
+                    question: z.string().trim().min(1),
+                    options: z.array(z.string().trim().min(1)).min(2).max(5),
+                    correctIndex: z.number().int().nonnegative(),
+                    explanation: z.string().trim().min(1),
+                })
+                .refine(
+                    (question) => question.correctIndex < question.options.length,
+                    { message: "correctIndex must point at an existing option" },
+                ),
+        )
+        .min(3)
+        .max(15),
+});
+
+export const mindmapOutputContentSchema = z.object({
+    nodes: z
+        .array(
+            z.object({
+                id: z.string().trim().min(1),
+                label: z.string().trim().min(1),
+            }),
+        )
+        .min(2)
+        .max(40),
+    edges: z.array(
+        z.object({
+            id: z.string().trim().min(1),
+            source: z.string().trim().min(1),
+            target: z.string().trim().min(1),
+        }),
+    ),
+});
+
+export const reportOutputContentSchema = z.object({
+    markdown: z.string().trim().min(1),
+    sections: z.array(
+        z.object({
+            title: z.string().trim().min(1),
+            content: z.string().trim().min(1),
+        }),
+    ),
+});
+
+export const studyGuideOutputContentSchema = z.object({
+    overview: z.string().trim().min(1),
+    sections: z
+        .array(
+            z.object({
+                title: z.string().trim().min(1),
+                summary: z.string().trim().min(1),
+                keyPoints: z.array(z.string().trim().min(1)).min(1).max(10),
+                studyPrompts: z.array(z.string().trim().min(1)).max(5),
+            }),
+        )
+        .min(1)
+        .max(12),
+    glossary: z
+        .array(
+            z.object({
+                term: z.string().trim().min(1),
+                definition: z.string().trim().min(1),
+            }),
+        )
+        .max(30),
+});
+
+export const faqOutputContentSchema = z.object({
+    items: z
+        .array(
+            z.object({
+                question: z.string().trim().min(1),
+                answer: z.string().trim().min(1),
+            }),
+        )
+        .min(3)
+        .max(25),
+});
+
+export const timelineOutputContentSchema = z.object({
+    events: z
+        .array(
+            z.object({
+                label: z.string().trim().min(1),
+                when: z.string().trim().min(1),
+                description: z.string().trim().min(1),
+            }),
+        )
+        .min(2)
+        .max(40),
+});
+
+export const briefingOutputContentSchema = z.object({
+    headline: z.string().trim().min(1),
+    summary: z.string().trim().min(1),
+    keyPoints: z.array(z.string().trim().min(1)).min(3).max(12),
+    decisions: z.array(z.string().trim().min(1)).max(10),
+    risks: z.array(z.string().trim().min(1)).max(10),
+    nextSteps: z.array(z.string().trim().min(1)).max(10),
+});
+
+export type SummaryOutputContent = z.infer<typeof summaryOutputContentSchema>;
+export type TakeawaysOutputContent = z.infer<
+    typeof takeawaysOutputContentSchema
+>;
+export type FlashcardsOutputContent = z.infer<
+    typeof flashcardsOutputContentSchema
+>;
+export type QuizOutputContent = z.infer<typeof quizOutputContentSchema>;
+export type MindmapOutputContent = z.infer<typeof mindmapOutputContentSchema>;
+export type ReportOutputContent = z.infer<typeof reportOutputContentSchema>;
+export type StudyGuideOutputContent = z.infer<
+    typeof studyGuideOutputContentSchema
+>;
+export type FaqOutputContent = z.infer<typeof faqOutputContentSchema>;
+export type TimelineOutputContent = z.infer<typeof timelineOutputContentSchema>;
+export type BriefingOutputContent = z.infer<typeof briefingOutputContentSchema>;
+
+/** Output content tagged with the type it was generated for. */
+export type OutputContent =
+    | { type: "SUMMARY"; data: SummaryOutputContent }
+    | { type: "TAKEAWAYS"; data: TakeawaysOutputContent }
+    | { type: "FLASHCARDS"; data: FlashcardsOutputContent }
+    | { type: "QUIZ"; data: QuizOutputContent }
+    | { type: "MINDMAP"; data: MindmapOutputContent }
+    | { type: "REPORT"; data: ReportOutputContent }
+    | { type: "STUDY_GUIDE"; data: StudyGuideOutputContent }
+    | { type: "FAQ"; data: FaqOutputContent }
+    | { type: "TIMELINE"; data: TimelineOutputContent }
+    | { type: "BRIEFING"; data: BriefingOutputContent };
+
+/**
+ * Validates stored or freshly generated output content against the schema for
+ * its type.
+ *
+ * @param type - Output type the content was generated for
+ * @param value - Raw content JSON
+ * @returns Tagged content when valid, otherwise `null`
+ */
+export function parseOutputContent(
+    type: OutputType,
+    value: JsonReadValue | undefined,
+): OutputContent | null {
+    if (value === null || value === undefined) {
+        return null;
+    }
+
+    switch (type) {
+        case "SUMMARY": {
+            const parsed = summaryOutputContentSchema.safeParse(value);
+            return parsed.success ? { type, data: parsed.data } : null;
+        }
+        case "TAKEAWAYS": {
+            const parsed = takeawaysOutputContentSchema.safeParse(value);
+            return parsed.success ? { type, data: parsed.data } : null;
+        }
+        case "FLASHCARDS": {
+            const parsed = flashcardsOutputContentSchema.safeParse(value);
+            return parsed.success ? { type, data: parsed.data } : null;
+        }
+        case "QUIZ": {
+            const parsed = quizOutputContentSchema.safeParse(value);
+            return parsed.success ? { type, data: parsed.data } : null;
+        }
+        case "MINDMAP": {
+            const parsed = mindmapOutputContentSchema.safeParse(value);
+            return parsed.success ? { type, data: parsed.data } : null;
+        }
+        case "REPORT": {
+            const parsed = reportOutputContentSchema.safeParse(value);
+            return parsed.success ? { type, data: parsed.data } : null;
+        }
+        case "STUDY_GUIDE": {
+            const parsed = studyGuideOutputContentSchema.safeParse(value);
+            return parsed.success ? { type, data: parsed.data } : null;
+        }
+        case "FAQ": {
+            const parsed = faqOutputContentSchema.safeParse(value);
+            return parsed.success ? { type, data: parsed.data } : null;
+        }
+        case "TIMELINE": {
+            const parsed = timelineOutputContentSchema.safeParse(value);
+            return parsed.success ? { type, data: parsed.data } : null;
+        }
+        case "BRIEFING": {
+            const parsed = briefingOutputContentSchema.safeParse(value);
+            return parsed.success ? { type, data: parsed.data } : null;
+        }
+    }
+}

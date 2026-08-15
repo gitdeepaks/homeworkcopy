@@ -1,3 +1,8 @@
+import type {
+    OutputFailureCode,
+    OutputFailureStage,
+} from "@homeworkcopy/contracts";
+
 export class AppError extends Error {
     constructor(
         public readonly statusCode: number,
@@ -61,6 +66,34 @@ export class SourceSelectionError extends AppError {
         this.name = "SourceSelectionError";
     }
 }
+
+/**
+ * Failure raised anywhere in the Studio output pipeline. The stage/code pair is
+ * persisted on the output so the client can explain and retry accurately.
+ */
+export class OutputGenerationError extends AppError {
+    constructor(
+        public readonly stage: OutputFailureStage,
+        public readonly failureCode: OutputFailureCode,
+        message: string,
+    ) {
+        super(OUTPUT_FAILURE_STATUS[failureCode], failureCode, message);
+        this.name = "OutputGenerationError";
+    }
+
+    /** Whether retrying the same request could plausibly succeed. */
+    get isRetriable(): boolean {
+        return this.failureCode === "GENERATION_FAILED";
+    }
+}
+
+const OUTPUT_FAILURE_STATUS: Record<OutputFailureCode, number> = {
+    SOURCES_UNAVAILABLE: 409,
+    NO_SOURCE_CONTENT: 400,
+    UNSUPPORTED_OUTPUT_TYPE: 400,
+    GENERATION_FAILED: 502,
+    INVALID_MODEL_OUTPUT: 502,
+};
 
 export class WebSearchUnavailableError extends AppError {
     constructor() {

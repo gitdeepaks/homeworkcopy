@@ -255,6 +255,10 @@ enum ArtifactType {
   QUIZ
   MINDMAP
   REPORT
+  STUDY_GUIDE
+  FAQ
+  TIMELINE
+  BRIEFING
 }
 
 enum ArtifactStatus {
@@ -262,6 +266,7 @@ enum ArtifactStatus {
   PROCESSING
   READY
   FAILED
+  CANCELLED
 }
 
 model LearningArtifact {
@@ -270,8 +275,11 @@ model LearningArtifact {
   type        ArtifactType
   title       String
   content     Json?
+  contentVersion Int         @default(1)
   sourceIds   String[]
   status      ArtifactStatus @default(PENDING)
+  attemptCount Int           @default(0)
+  cancelledAt DateTime?
   metadata    Json?
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt

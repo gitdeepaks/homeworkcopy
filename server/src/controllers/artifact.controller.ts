@@ -1,13 +1,18 @@
 import type { Request, Response } from "express";
 import {
+    cancelArtifactForWorkspace,
     createArtifactForWorkspace,
     deleteArtifactForWorkspace,
+    duplicateArtifactForWorkspace,
     getArtifactForWorkspace,
     listArtifactsForWorkspace,
+    regenerateArtifactForWorkspace,
+    renameArtifactForWorkspace,
 } from "../services/artifact.service.js";
 import {
     artifactIdParamSchema,
     createArtifactSchema,
+    renameArtifactSchema,
 } from "../validators/artifact.validator.js";
 import { workspaceIdParamSchema } from "../validators/workspace.validator.js";
 
@@ -39,6 +44,48 @@ export async function createArtifact(req: Request, res: Response) {
         input,
     );
     res.status(201).json(artifact);
+}
+
+export async function renameArtifact(req: Request, res: Response) {
+    const { workspaceId, artifactId } = artifactIdParamSchema.parse(req.params);
+    const { title } = renameArtifactSchema.parse(req.body);
+    const artifact = await renameArtifactForWorkspace(
+        workspaceId,
+        artifactId,
+        req.session.user.id,
+        title,
+    );
+    res.json(artifact);
+}
+
+export async function regenerateArtifact(req: Request, res: Response) {
+    const { workspaceId, artifactId } = artifactIdParamSchema.parse(req.params);
+    const artifact = await regenerateArtifactForWorkspace(
+        workspaceId,
+        artifactId,
+        req.session.user.id,
+    );
+    res.status(202).json(artifact);
+}
+
+export async function duplicateArtifact(req: Request, res: Response) {
+    const { workspaceId, artifactId } = artifactIdParamSchema.parse(req.params);
+    const artifact = await duplicateArtifactForWorkspace(
+        workspaceId,
+        artifactId,
+        req.session.user.id,
+    );
+    res.status(201).json(artifact);
+}
+
+export async function cancelArtifact(req: Request, res: Response) {
+    const { workspaceId, artifactId } = artifactIdParamSchema.parse(req.params);
+    const artifact = await cancelArtifactForWorkspace(
+        workspaceId,
+        artifactId,
+        req.session.user.id,
+    );
+    res.json(artifact);
 }
 
 export async function deleteArtifact(req: Request, res: Response) {
