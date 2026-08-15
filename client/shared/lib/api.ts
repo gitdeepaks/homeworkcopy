@@ -14,6 +14,7 @@ export function setApiTokenGetter(getter: TokenGetter | null): void {
 export class ApiError extends Error {
     constructor(
         public status: number,
+        public code: string,
         message: string,
         public details?: JsonValue,
     ) {
@@ -61,7 +62,12 @@ export async function apiFetch<T>(
 
     if (!response.ok) {
         const parsed = apiErrorResponseSchema.safeParse(data);
-        throw new ApiError(response.status, parsed.success ? parsed.data.error.message : "Request failed", parsed.success ? parsed.data.error.details : undefined);
+        throw new ApiError(
+            response.status,
+            parsed.success ? parsed.data.error.code : "REQUEST_FAILED",
+            parsed.success ? parsed.data.error.message : "Request failed",
+            parsed.success ? parsed.data.error.details : undefined,
+        );
     }
 
     return data;
@@ -80,10 +86,23 @@ export async function apiFetchVoid(
     path: string,
     options: RequestInit = {},
 ): Promise<void> {
-    const response = await authenticatedFetch(path, options);
+    const headers = new Headers(options.headers);
+    if (
+        options.body &&
+        !headers.has("Content-Type") &&
+        !(options.body instanceof FormData)
+    ) {
+        headers.set("Content-Type", "application/json");
+    }
+    const response = await authenticatedFetch(path, { ...options, headers });
     if (response.ok) return;
 
     const data = await response.json().catch(() => null);
     const parsed = apiErrorResponseSchema.safeParse(data);
-    throw new ApiError(response.status, parsed.success ? parsed.data.error.message : "Request failed", parsed.success ? parsed.data.error.details : undefined);
+    throw new ApiError(
+        response.status,
+        parsed.success ? parsed.data.error.code : "REQUEST_FAILED",
+        parsed.success ? parsed.data.error.message : "Request failed",
+        parsed.success ? parsed.data.error.details : undefined,
+    );
 }

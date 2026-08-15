@@ -26,12 +26,14 @@ import {
     toUIMessageStream,
     tool,
     type UIMessage,
+    type LanguageModelUsage,
 } from "ai";
 import {
     CHAT_MODEL,
     CHAT_MODELS,
     CONVERSATION_SUMMARY_INTERVAL,
     RECENT_MESSAGE_WINDOW,
+    CHAT_MAX_OUTPUT_TOKENS,
 } from "../lib/ai-config.js";
 import { enqueueConversationSummarize } from "../lib/conversation-events.js";
 import {
@@ -46,12 +48,15 @@ import {
     touchConversation,
     updateConversationRecord,
     deleteConversationRecord,
+    claimConversationGeneration,
+    releaseConversationGeneration,
 } from "../repositories/conversation.repository.js";
 import {
     createAssistantMessageWithValidatedCitations,
-    createMessageRecord,
     countMessagesByConversationId,
     findMessagesByConversationId,
+    prepareChatUserMessage,
+    updateMessageFeedback,
 } from "../repositories/message.repository.js";
 import { findExistingSourceIds } from "../repositories/source.repository.js";
 import { findExistingChunkIds } from "../repositories/source-chunk.repository.js";
@@ -81,8 +86,17 @@ import {
     type SourceCitation,
     type SourceSelectionMode,
     type WebCitation,
+    CHAT_WEB_QUERY_MAX_LENGTH,
+    type ChatTrigger,
+    type MessageFeedback,
 } from "@homeworkcopy/contracts";
 import { logger } from "../lib/logger.js";
+import {
+    reconcileChatQuota,
+    reserveChatQuota,
+    validateChatMessageLengths,
+} from "./chat-quota.service.js";
+import { createArtifactRecord } from "../repositories/artifact.repository.js";
 
 /**
  * Lists all conversations in a workspace for the sidebar/history UI.
@@ -235,6 +249,110 @@ export async function deleteConversationForWorkspace(
     await deleteConversationRecord(conversationId);
 }
 
+export async function renameConversationForWorkspace(
+    workspaceId: string,
+    conversationId: string,
+    userId: string,
+    title: string,
+) {
+    await getWorkspaceByIdForUser(workspaceId, userId);
+    const conversation = await findConversationByIdAndWorkspaceId(
+        conversationId,
+        workspaceId,
+    );
+    if (!conversation) throw new NotFoundError("Conversation not found");
+    return updateConversationRecord(conversationId, { title });
+}
+
+export async function setMessageFeedbackForWorkspace(
+    workspaceId: string,
+    conversationId: string,
+    messageId: string,
+    userId: string,
+    feedback: MessageFeedback,
+) {
+    await getWorkspaceByIdForUser(workspaceId, userId);
+    const conversation = await findConversationByIdAndWorkspaceId(
+        conversationId,
+        workspaceId,
+    );
+    if (!conversation) throw new NotFoundError("Conversation not found");
+    return updateMessageFeedback({ conversationId, messageId, feedback });
+}
+
+export async function saveMessageAsOutputForWorkspace(
+    workspaceId: string,
+    conversationId: string,
+    messageId: string,
+    userId: string,
+) {
+    await getWorkspaceByIdForUser(workspaceId, userId);
+    const conversation = await findConversationByIdAndWorkspaceId(
+        conversationId,
+        workspaceId,
+    );
+    if (!conversation) throw new NotFoundError("Conversation not found");
+    const messages = await findMessagesByConversationId(conversationId);
+    const message = messages.find(
+        (candidate) =>
+            candidate.role === "ASSISTANT" &&
+            (candidate.id === messageId || candidate.clientMessageId === messageId),
+    );
+    if (!message) throw new NotFoundError("Answer not found");
+    const grounding = citationEnvelopeSchema.safeParse(message.citations);
+    const sourceIds = grounding.success
+        ? [...new Set(grounding.data.items.flatMap((citation) =>
+              citation.kind === "source" ? [citation.sourceId] : [],
+          ))]
+        : [];
+    return createArtifactRecord({
+        workspaceId,
+        type: "SUMMARY",
+        title: `Saved answer · ${new Date().toLocaleDateString()}`,
+        sourceIds,
+        status: "READY",
+        content: { markdown: message.content },
+        metadata: {
+            savedFromConversationId: conversationId,
+            savedFromMessageId: message.id,
+            generatedAt: new Date().toISOString(),
+        },
+    });
+}
+
+export async function getChatGuideForWorkspace(
+    workspaceId: string,
+    userId: string,
+    selection: { selectionMode: SourceSelectionMode; sourceIds: string[] },
+) {
+    const sources = await resolveReadySourcesForWorkspace(
+        workspaceId,
+        userId,
+        selection,
+    );
+    const titles = sources.slice(0, 4).map((source) => source.title);
+    const questions = titles.slice(0, 3).map(
+        (title) => `What are the main ideas and supporting details in “${title}”?`,
+    );
+    if (questions.length < 4 && sources.length > 1) {
+        questions.push("How do the selected sources agree, differ, or build on one another?");
+    }
+    while (questions.length < 3) {
+        questions.push(
+            questions.length === 0
+                ? "What are the most important ideas in the selected sources?"
+                : questions.length === 1
+                  ? "Which evidence best supports the central claims?"
+                  : "What should I review first to understand this material?",
+        );
+    }
+    return {
+        overview: `This notebook is ready to research with ${sources.length} selected ${sources.length === 1 ? "source" : "sources"}: ${titles.join(", ")}.`,
+        questions: questions.slice(0, 4),
+        sourceIds: sources.map((source) => source.id),
+    };
+}
+
 /**
  * Finds an existing conversation or creates one from the first user message.
  *
@@ -264,10 +382,16 @@ async function resolveConversation(
         return existing;
     }
 
-    return createConversationRecord(
-        workspaceId,
-        buildConversationTitle(firstMessage),
-    );
+    void firstMessage;
+    return createConversationRecord(workspaceId);
+}
+
+function toUIMessage(message: Awaited<ReturnType<typeof findMessagesByConversationId>>[number]): UIMessage {
+    return {
+        id: message.clientMessageId ?? message.id,
+        role: message.role === "USER" ? "user" : "assistant",
+        parts: [{ type: "text", text: message.content }],
+    };
 }
 
 /**
@@ -301,8 +425,12 @@ export async function streamWorkspaceChat(
         selectionMode: SourceSelectionMode;
         sourceIds: string[];
         groundingMode: GroundingMode;
+        trigger: ChatTrigger;
+        messageId?: string;
+        abortSignal: AbortSignal;
     },
 ) {
+    validateChatMessageLengths(input.messages);
     const workspace = await getWorkspaceByIdForUser(workspaceId, userId);
     const requestedModel = input.model ?? workspace.defaultModel;
     const chatModel =
@@ -316,6 +444,10 @@ export async function streamWorkspaceChat(
     if (!userText) {
         throw new ValidationError("A user message is required");
     }
+    const userMessage = [...input.messages]
+        .reverse()
+        .find((message) => message.role === "user");
+    if (!userMessage) throw new ValidationError("A user message is required");
 
     const selectedSources = await resolveReadySourcesForWorkspace(
         workspaceId,
@@ -333,32 +465,67 @@ export async function streamWorkspaceChat(
         sourceIds: resolvedSourceIds,
         retrievalVersion: RETRIEVAL_VERSION,
     };
-
     const conversation = await resolveConversation(
         workspaceId,
         input.conversationId,
         userText,
     );
+    res.setHeader("X-Conversation-Id", conversation.id);
+    const generationLeaseId = await claimConversationGeneration(conversation.id);
 
-    await createMessageRecord({
-        conversationId: conversation.id,
-        role: "USER",
-        content: userText,
-        grounding,
-    });
+    let preparedTurn: Awaited<ReturnType<typeof prepareChatUserMessage>>;
+    try {
+        preparedTurn = await prepareChatUserMessage({
+            conversationId: conversation.id,
+            clientMessageId: userMessage.id,
+            content: userText,
+            grounding,
+            trigger: input.trigger,
+            targetMessageId: input.messageId,
+        });
+    } catch (error) {
+        await releaseConversationGeneration(conversation.id, generationLeaseId);
+        throw error;
+    }
+    const persistedMessages = await findMessagesByConversationId(conversation.id);
+    const editIndex = preparedTurn.pendingEdit
+        ? persistedMessages.findIndex(
+              (message) => message.id === preparedTurn.pendingEdit?.id,
+          )
+        : -1;
+    const branchMessages = editIndex >= 0
+        ? persistedMessages.slice(0, editIndex + 1)
+        : persistedMessages;
+    const authoritativeMessages = branchMessages
+        .filter((message) => message.id !== preparedTurn.retryOfId)
+        .map((message) =>
+            preparedTurn.pendingEdit?.id === message.id
+                ? toUIMessage(preparedTurn.userMessage)
+                : toUIMessage(message),
+        );
+    const effectiveSummary = preparedTurn.pendingEdit || preparedTurn.retryOfId
+        ? null
+        : conversation.summary;
 
     const retrievalQuery = rewriteFollowUpQuery(
-        input.messages,
-        conversation.summary,
+        authoritativeMessages,
+        effectiveSummary,
     );
-    const [retrieval, userMemories] = await Promise.all([
-        retrieveWorkspaceContext({
-            workspaceId,
-            sourceIds: resolvedSourceIds,
-            query: retrievalQuery,
-        }),
-        searchUserMemories(userId, userText),
-    ]);
+    let retrieval: Awaited<ReturnType<typeof retrieveWorkspaceContext>>;
+    let userMemories: Awaited<ReturnType<typeof searchUserMemories>>;
+    try {
+        [retrieval, userMemories] = await Promise.all([
+            retrieveWorkspaceContext({
+                workspaceId,
+                sourceIds: resolvedSourceIds,
+                query: retrievalQuery,
+            }),
+            searchUserMemories(userId, userText),
+        ]);
+    } catch (error) {
+        await releaseConversationGeneration(conversation.id, generationLeaseId);
+        throw error;
+    }
     const retrievedChunks = retrieval.chunks;
     logger.info(
         {
@@ -386,18 +553,34 @@ export async function streamWorkspaceChat(
     }));
     const systemPrompt = buildChatSystemPrompt({
         chunks: retrievedChunks,
-        conversationSummary: conversation.summary,
+        conversationSummary: effectiveSummary,
         userMemories: userMemories.map((memory) => memory.memory),
         groundingMode: input.groundingMode,
     });
 
     const contextMessages =
-        conversation.summary &&
-        input.messages.length > RECENT_MESSAGE_WINDOW
-            ? input.messages.slice(-RECENT_MESSAGE_WINDOW)
-            : input.messages;
+        effectiveSummary &&
+        authoritativeMessages.length > RECENT_MESSAGE_WINDOW
+            ? authoritativeMessages.slice(-RECENT_MESSAGE_WINDOW)
+            : authoritativeMessages;
+
+    let quotaReservation: Awaited<ReturnType<typeof reserveChatQuota>>;
+    try {
+        quotaReservation = await reserveChatQuota(
+            userId,
+            contextMessages,
+            systemPrompt.length + (webSearchEnabled ? 100_000 : 0),
+            webSearchEnabled
+                ? CHAT_MAX_OUTPUT_TOKENS * 3
+                : CHAT_MAX_OUTPUT_TOKENS,
+        );
+    } catch (error) {
+        await releaseConversationGeneration(conversation.id, generationLeaseId);
+        throw error;
+    }
 
     const webCitations: WebCitation[] = [];
+    let generationUsage: Promise<LanguageModelUsage> | undefined;
 
     const stream = createUIMessageStream({
         originalMessages: input.messages,
@@ -411,6 +594,9 @@ export async function streamWorkspaceChat(
                               inputSchema: z.object({
                                   query: z
                                       .string()
+                                      .trim()
+                                      .min(1)
+                                      .max(CHAT_WEB_QUERY_MAX_LENGTH)
                                       .describe(
                                           "The search query for current web information",
                                       ),
@@ -452,17 +638,42 @@ export async function streamWorkspaceChat(
                 tools,
                 stopWhen: webSearchEnabled ? isStepCount(3) : undefined,
                 experimental_transform: smoothStream(),
+                abortSignal: AbortSignal.any([
+                    input.abortSignal,
+                    AbortSignal.timeout(2 * 60 * 1_000),
+                ]),
+                maxOutputTokens: CHAT_MAX_OUTPUT_TOKENS,
             });
+            generationUsage = Promise.resolve(result.usage);
 
             writer.merge(toUIMessageStream({ stream: result.stream }));
         },
-        onFinish: async ({ responseMessage, isAborted }) => {
+        onFinish: async ({ responseMessage, isAborted, finishReason }) => {
+            if (generationUsage) {
+                void generationUsage
+                    .then((usage) =>
+                        reconcileChatQuota(userId, quotaReservation, usage),
+                    )
+                    .catch((error) => {
+                        logger.warn(
+                            { error, userId, conversationId: conversation.id },
+                            "chat usage reconciliation failed",
+                        );
+                    });
+            }
             if (isAborted) {
+                await releaseConversationGeneration(conversation.id, generationLeaseId);
+                return;
+            }
+
+            if (finishReason !== "stop" && finishReason !== "length") {
+                await releaseConversationGeneration(conversation.id, generationLeaseId);
                 return;
             }
 
             const assistantText = getTextFromUIMessage(responseMessage).trim();
             if (!assistantText) {
+                await releaseConversationGeneration(conversation.id, generationLeaseId);
                 return;
             }
 
@@ -498,26 +709,35 @@ export async function streamWorkspaceChat(
                 content: assistantText,
                 citations: { version: 1, items: allCitations },
                 grounding,
+                clientMessageId: responseMessage.id,
+                retryOfId: preparedTurn.retryOfId,
+                pendingEdit: preparedTurn.pendingEdit,
+                generationLeaseId,
             });
 
-            await touchConversation(conversation.id);
+            void touchConversation(conversation.id).catch((error) => {
+                logger.warn({ error, conversationId: conversation.id }, "conversation touch failed");
+            });
 
             if (!conversation.title) {
-                await updateConversationRecord(conversation.id, {
+                void updateConversationRecord(conversation.id, {
                     title: buildConversationTitle(userText),
+                }).catch((error) => {
+                    logger.warn({ error, conversationId: conversation.id }, "conversation title update failed");
                 });
             }
 
-            const messageCount = await countMessagesByConversationId(
-                conversation.id,
-            );
-
-            if (messageCount % CONVERSATION_SUMMARY_INTERVAL === 0) {
-                await enqueueConversationSummarize({
-                    conversationId: conversation.id,
-                    userId,
+            void countMessagesByConversationId(conversation.id)
+                .then((messageCount) => {
+                    if (messageCount % CONVERSATION_SUMMARY_INTERVAL !== 0) return;
+                    return enqueueConversationSummarize({
+                        conversationId: conversation.id,
+                        userId,
+                    });
+                })
+                .catch((error) => {
+                    logger.warn({ error, conversationId: conversation.id }, "conversation summary enqueue failed");
                 });
-            }
 
             void addMemoriesFromMessages(
                 userId,
@@ -538,14 +758,19 @@ export async function streamWorkspaceChat(
         },
     });
 
-    await pipeUIMessageStreamToResponse({
-        response: res,
-        stream,
-        headers: {
-            "X-Conversation-Id": conversation.id,
-            "Content-Encoding": "none",
-            "Cache-Control": "no-cache, no-transform",
-            "X-Accel-Buffering": "no",
-        },
-    });
+    try {
+        await pipeUIMessageStreamToResponse({
+            response: res,
+            stream,
+            headers: {
+                "X-Conversation-Id": conversation.id,
+                "Content-Encoding": "none",
+                "Cache-Control": "no-cache, no-transform",
+                "X-Accel-Buffering": "no",
+            },
+        });
+    } catch (error) {
+        await releaseConversationGeneration(conversation.id, generationLeaseId);
+        throw error;
+    }
 }

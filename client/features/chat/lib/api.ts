@@ -1,12 +1,37 @@
-import { apiFetch, apiFetchVoid } from "@/shared/lib/api";
-import type { ChatMessage, Conversation } from "./types";
+import { apiFetchVoid, apiFetchWithSchema } from "@/shared/lib/api";
+import type { ChatMessage } from "./types";
 import {
     citationEnvelopeSchema,
     citationSchema,
     groundingSnapshotSchema,
     sourceTypeSchema,
+    chatGuideSchema,
+    type MessageFeedback,
+    type SourceSelection,
 } from "@homeworkcopy/contracts";
 import { z } from "zod";
+
+const conversationSchema = z.object({
+    id: z.string().min(1),
+    workspaceId: z.string().min(1),
+    title: z.string().nullable(),
+    createdAt: z.iso.datetime(),
+    updatedAt: z.iso.datetime(),
+});
+
+const chatMessageWireSchema = z.object({
+    id: z.string().min(1),
+    conversationId: z.string().min(1),
+    role: z.enum(["USER", "ASSISTANT"]),
+    content: z.string(),
+    citations: z.json(),
+    grounding: z.json(),
+    clientMessageId: z.string().nullable(),
+    retryOfId: z.string().nullable(),
+    supersededAt: z.iso.datetime().nullable(),
+    feedback: z.enum(["HELPFUL", "NOT_HELPFUL"]).nullable(),
+    createdAt: z.iso.datetime(),
+});
 
 const legacyCitationSchema = z.object({
     sourceId: z.string().min(1).optional(),
@@ -21,14 +46,16 @@ const legacyCitationSchema = z.object({
 });
 
 export function listConversations(workspaceId: string) {
-    return apiFetch<Conversation[]>(
+    return apiFetchWithSchema(
         `/api/workspaces/${workspaceId}/conversations`,
+        z.array(conversationSchema),
     );
 }
 
 export function createConversation(workspaceId: string, title?: string) {
-    return apiFetch<Conversation>(
+    return apiFetchWithSchema(
         `/api/workspaces/${workspaceId}/conversations`,
+        conversationSchema,
         {
             method: "POST",
             body: JSON.stringify(title ? { title } : {}),
@@ -40,14 +67,59 @@ export function listConversationMessages(
     workspaceId: string,
     conversationId: string,
 ) {
-    return apiFetch<ChatMessageWire[]>(
+    return apiFetchWithSchema(
         `/api/workspaces/${workspaceId}/conversations/${conversationId}/messages`,
+        z.array(chatMessageWireSchema),
     ).then((messages) =>
         messages.map((message) => ({
             ...message,
+            id: message.clientMessageId ?? message.id,
             citations: parseCitations(message.citations),
             grounding: parseGrounding(message.grounding),
         })),
+    );
+}
+
+export function renameConversation(
+    workspaceId: string,
+    conversationId: string,
+    title: string,
+) {
+    return apiFetchWithSchema(
+        `/api/workspaces/${workspaceId}/conversations/${conversationId}`,
+        conversationSchema,
+        { method: "PATCH", body: JSON.stringify({ title }) },
+    );
+}
+
+export function setMessageFeedback(
+    workspaceId: string,
+    conversationId: string,
+    messageId: string,
+    feedback: MessageFeedback,
+) {
+    return apiFetchVoid(
+        `/api/workspaces/${workspaceId}/conversations/${conversationId}/messages/${messageId}/feedback`,
+        { method: "PUT", body: JSON.stringify({ feedback }) },
+    );
+}
+
+export function saveMessageAsOutput(
+    workspaceId: string,
+    conversationId: string,
+    messageId: string,
+) {
+    return apiFetchVoid(
+        `/api/workspaces/${workspaceId}/conversations/${conversationId}/messages/${messageId}/output`,
+        { method: "POST" },
+    );
+}
+
+export function getChatGuide(workspaceId: string, selection: SourceSelection) {
+    return apiFetchWithSchema(
+        `/api/workspaces/${workspaceId}/chat/guide`,
+        chatGuideSchema,
+        { method: "POST", body: JSON.stringify(selection) },
     );
 }
 
@@ -62,11 +134,6 @@ export function deleteConversation(
 }
 
 type JsonValue = z.infer<typeof z.json>;
-type ChatMessageWire = Omit<ChatMessage, "citations" | "grounding"> & {
-    citations: JsonValue;
-    grounding: JsonValue;
-};
-
 export function parseCitations(value: JsonValue): ChatMessage["citations"] {
     const envelope = citationEnvelopeSchema.safeParse(value);
     if (envelope.success) return envelope.data.items;

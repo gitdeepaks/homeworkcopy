@@ -117,4 +117,19 @@ describe("notebook UI store", () => {
         expect(view.activeSourceId).toBeNull();
         expect(view.composerDraft).toBe("Keep this question");
     });
+
+    test("keeps the active conversation scoped to its notebook", () => {
+        const state = useNotebookUiStore.getState();
+        state.setActiveConversationId("notebook-a", "conversation-a");
+        state.setActiveConversationId("notebook-b", "conversation-b");
+
+        expect(
+            selectNotebookViewState(useNotebookUiStore.getState(), "notebook-a")
+                .activeConversationId,
+        ).toBe("conversation-a");
+        expect(
+            selectNotebookViewState(useNotebookUiStore.getState(), "notebook-b")
+                .activeConversationId,
+        ).toBe("conversation-b");
+    });
 });

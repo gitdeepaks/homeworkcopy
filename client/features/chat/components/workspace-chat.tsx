@@ -3,14 +3,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
-import { authenticatedFetch } from "@/shared/lib/api";
+import { ApiError, authenticatedFetch } from "@/shared/lib/api";
+import { apiErrorResponseSchema, type JsonValue } from "@homeworkcopy/contracts";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
     BotIcon,
+    CheckIcon,
+    ClipboardIcon,
     DownloadIcon,
+    HistoryIcon,
     Loader2Icon,
     MessageSquarePlusIcon,
+    PencilIcon,
+    RefreshCwIcon,
+    SaveIcon,
+    ThumbsDownIcon,
+    ThumbsUpIcon,
     Trash2Icon,
 } from "lucide-react";
 import {
@@ -31,20 +40,43 @@ import {
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Button } from "@/components/ui/button";
 import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuLabel,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
     buildCitationMap,
     chatKeys,
     useConversationMessages,
     useConversations,
-    useCreateConversation,
     useDeleteConversation,
+    useRenameConversation,
+    useMessageFeedback,
+    useSaveMessageAsOutput,
+    useChatGuide,
 } from "../hooks/use-conversations";
 import { ChatMessageBody } from "./chat-message-body";
 import { CitationSources } from "./citation-sources";
@@ -59,6 +91,7 @@ import {
     downloadMarkdown,
     exportConversationMarkdown,
 } from "../lib/export-chat";
+import { listConversationMessages } from "../lib/api";
 
 type WorkspaceChatProps = {
     workspaceId: string;
@@ -106,6 +139,13 @@ export function WorkspaceChat({
     const [citationsByMessageId, setCitationsByMessageId] = useState<
         Record<string, ChatCitation[]>
     >({});
+    const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+    const [renameOpen, setRenameOpen] = useState(false);
+    const [renameTitle, setRenameTitle] = useState("");
+    const [deleteOpen, setDeleteOpen] = useState(false);
+    const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+    const [savedMessageId, setSavedMessageId] = useState<string | null>(null);
+    const lastSubmittedText = useRef<string | null>(null);
 
     const storedPrefs = useChatPreferences(
         (state) => state.byWorkspace[workspaceId],
@@ -139,6 +179,16 @@ export function WorkspaceChat({
             ),
         [sources, sourceSelectionMode, selectedSourceIds],
     );
+    const sourceCounts = useMemo(
+        () => ({
+            ready: sources.filter((source) => source.status === "READY").length,
+            processing: sources.filter(
+                (source) => source.status === "PENDING" || source.status === "PROCESSING",
+            ).length,
+            failed: sources.filter((source) => source.status === "FAILED").length,
+        }),
+        [sources],
+    );
     const selectionWarning = sourcesError
         ? "Could not verify the selected sources. Try again."
         : sourceSelection.exceedsSourceLimit
@@ -152,8 +202,15 @@ export function WorkspaceChat({
         !sourcesLoading && !sourcesError && sourceSelection.canUseSelection;
     const { data: storedMessages, isLoading: messagesLoading } =
         useConversationMessages(workspaceId, conversationId);
-    const createConversation = useCreateConversation(workspaceId);
     const deleteConversation = useDeleteConversation(workspaceId);
+    const renameConversation = useRenameConversation(workspaceId);
+    const messageFeedback = useMessageFeedback(workspaceId);
+    const saveMessage = useSaveMessageAsOutput(workspaceId);
+    const { data: chatGuide } = useChatGuide(
+        workspaceId,
+        sourceSelection.request,
+        sourceSelection.canUseSelection && !conversationId,
+    );
 
     const activeConversation = conversations.find(
         (conversation) => conversation.id === conversationId,
@@ -196,6 +253,20 @@ export function WorkspaceChat({
                         handleConversationId(newConversationId);
                     }
 
+                    if (!response.ok) {
+                        const payload: JsonValue = await response
+                            .clone()
+                            .json()
+                            .catch(() => null);
+                        const parsed = apiErrorResponseSchema.safeParse(payload);
+                        throw new ApiError(
+                            response.status,
+                            parsed.success ? parsed.data.error.code : "CHAT_FAILED",
+                            parsed.success ? parsed.data.error.message : "Chat request failed",
+                            parsed.success ? parsed.data.error.details : undefined,
+                        );
+                    }
+
                     return response;
                 }, { preconnect: fetch.preconnect }),
             }),
@@ -210,11 +281,27 @@ export function WorkspaceChat({
         ],
     );
 
-    const { messages, sendMessage, setMessages, status, error } = useChat({
+    const {
+        messages,
+        sendMessage,
+        setMessages,
+        status,
+        error,
+        stop,
+        regenerate,
+        clearError,
+    } = useChat({
         transport,
+        onError: () => {
+            const failedText = lastSubmittedText.current;
+            if (failedText) setComposerDraft(workspaceId, failedText);
+        },
     });
 
     const isStreaming = status === "streaming" || status === "submitted";
+    const latestAssistantId = [...messages]
+        .reverse()
+        .find((message) => message.role === "assistant")?.id;
     const showPendingAssistant =
         status === "submitted" && messages.at(-1)?.role === "user";
 
@@ -292,6 +379,7 @@ export function WorkspaceChat({
     ]);
 
     async function handleNewChat() {
+        if (isStreaming) await stop();
         setConversationId(workspaceId, null);
         setMessages([]);
         setCitationsByMessageId({});
@@ -303,7 +391,78 @@ export function WorkspaceChat({
         }
 
         await deleteConversation.mutateAsync(conversationId);
+        setDeleteOpen(false);
         await handleNewChat();
+    }
+
+    async function handleRenameConversation() {
+        if (!conversationId || !renameTitle.trim()) return;
+        await renameConversation.mutateAsync({
+            conversationId,
+            title: renameTitle.trim(),
+        });
+        setRenameOpen(false);
+    }
+
+    async function handleConversationSwitch(id: string) {
+        if (isStreaming) await stop();
+        setMessages([]);
+        setCitationsByMessageId({});
+        setConversationId(workspaceId, id);
+    }
+
+    async function handleCopy(messageId: string, text: string) {
+        await navigator.clipboard.writeText(text);
+        setCopiedMessageId(messageId);
+        window.setTimeout(() => setCopiedMessageId(null), 2_000);
+    }
+
+    function handleEdit(messageId: string, text: string) {
+        setEditingMessageId(messageId);
+        setComposerDraft(workspaceId, text);
+    }
+
+    async function handleRetry(messageId: string) {
+        clearError();
+        await regenerate({ messageId });
+    }
+
+    async function reloadConversationMessages(id: string) {
+        const recovered = await queryClient.fetchQuery({
+            queryKey: chatKeys(workspaceId).messages(id),
+            queryFn: () => listConversationMessages(workspaceId, id),
+            staleTime: 0,
+        });
+        setMessages(
+            recovered.map((message) => ({
+                id: message.id,
+                role: message.role === "USER" ? "user" : "assistant",
+                parts: [{ type: "text", text: message.content }],
+            })),
+        );
+        setCitationsByMessageId(buildCitationMap(recovered));
+        return recovered;
+    }
+
+    async function handleStop() {
+        await stop();
+        if (conversationId) await reloadConversationMessages(conversationId);
+    }
+
+    async function handleRecover() {
+        clearError();
+        if (!conversationId) {
+            await sendMessage();
+            return;
+        }
+        const recovered = await reloadConversationMessages(conversationId);
+        const lastMessage = recovered.at(-1);
+        if (lastMessage?.role === "USER") {
+            lastSubmittedText.current = lastMessage.content;
+            await sendMessage();
+        } else {
+            setComposerDraft(workspaceId, "");
+        }
     }
 
     function handleExportChat() {
@@ -325,31 +484,42 @@ export function WorkspaceChat({
     return (
         <div className="flex min-h-0 flex-1 flex-col">
             <div className="flex items-center gap-2 border-b px-4 py-3">
-                <Select
-                    value={conversationId ?? "new"}
-                    onValueChange={(value) => {
-                        if (value === "new") {
-                            void handleNewChat();
-                            return;
+                <DropdownMenu>
+                    <DropdownMenuTrigger
+                        render={
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                className="max-w-sm justify-start"
+                            />
                         }
-                        setConversationId(workspaceId, value);
-                    }}
-                >
-                    <SelectTrigger className="max-w-sm flex-1">
-                        <SelectValue placeholder="Select conversation" />
-                    </SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="new">New chat</SelectItem>
-                        {conversations.map((conversation) => (
-                            <SelectItem
+                    >
+                        <HistoryIcon />
+                        <span className="truncate">
+                            {activeConversation?.title ?? "Conversation history"}
+                        </span>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent className="w-72">
+                        <DropdownMenuLabel>Conversations</DropdownMenuLabel>
+                        <DropdownMenuItem onClick={() => void handleNewChat()}>
+                            <MessageSquarePlusIcon /> New chat
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        {conversations.length === 0 ? (
+                            <DropdownMenuItem disabled>No saved conversations</DropdownMenuItem>
+                        ) : conversations.map((conversation) => (
+                            <DropdownMenuItem
                                 key={conversation.id}
-                                value={conversation.id}
+                                onClick={() => void handleConversationSwitch(conversation.id)}
                             >
-                                {conversation.title ?? "Untitled chat"}
-                            </SelectItem>
+                                <span className="truncate">
+                                    {conversation.title ?? "Untitled chat"}
+                                </span>
+                                {conversation.id === conversationId ? <CheckIcon className="ml-auto" /> : null}
+                            </DropdownMenuItem>
                         ))}
-                    </SelectContent>
-                </Select>
+                    </DropdownMenuContent>
+                </DropdownMenu>
 
                 <Button
                     variant="outline"
@@ -371,16 +541,36 @@ export function WorkspaceChat({
                 </Button>
 
                 {conversationId ? (
-                    <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        onClick={() => void handleDeleteConversation()}
-                        disabled={deleteConversation.isPending}
-                    >
-                        <Trash2Icon />
-                    </Button>
+                    <>
+                        <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label="Rename conversation"
+                            onClick={() => {
+                                setRenameTitle(activeConversation?.title ?? "");
+                                setRenameOpen(true);
+                            }}
+                        >
+                            <PencilIcon />
+                        </Button>
+                        <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label="Delete conversation"
+                            onClick={() => setDeleteOpen(true)}
+                            disabled={deleteConversation.isPending}
+                        >
+                            <Trash2Icon />
+                        </Button>
+                    </>
                 ) : null}
             </div>
+
+            {sourceCounts.failed > 0 && sourceCounts.ready > 0 ? (
+                <div role="status" className="border-b bg-amber-500/10 px-4 py-2 text-xs text-amber-800 dark:text-amber-200">
+                    {sourceCounts.failed} source{sourceCounts.failed === 1 ? "" : "s"} failed to process. Chat will use the ready selected sources only.
+                </div>
+            ) : null}
 
             <MessageScrollerProvider>
                 <MessageScroller className="min-h-0 flex-1">
@@ -399,15 +589,42 @@ export function WorkspaceChat({
                                     </div>
                                     <div className="space-y-1">
                                         <p className="font-medium">
-                                            Chat with your sources
+                                            {sources.length === 0
+                                                ? "Add your first source"
+                                                : sourceCounts.ready === 0 && sourceCounts.processing > 0
+                                                  ? "Your sources are being prepared"
+                                                  : sourceCounts.ready === 0
+                                                    ? "No sources are ready"
+                                                    : "Your notebook is ready"}
                                         </p>
                                         <p className="max-w-sm text-sm text-muted-foreground">
-                                            Ask questions about the materials
-                                            in this notebook. Answers include
-                                            citations when relevant context is
-                                            found.
+                                            {sources.length === 0
+                                                ? "Add trusted material to start a grounded conversation."
+                                                : sourceCounts.ready === 0 && sourceCounts.processing > 0
+                                                  ? "Grounded chat becomes available as soon as a source finishes processing."
+                                                  : sourceCounts.ready === 0
+                                                    ? "Retry a failed source or add another source to begin."
+                                                    : chatGuide?.overview ?? "Ask questions about the selected material and verify answers with citations."}
                                         </p>
                                     </div>
+                                    {sourceCounts.ready > 0 && chatGuide ? (
+                                        <div className="mt-3 grid w-full max-w-xl gap-2" aria-label="Suggested questions">
+                                            {chatGuide.questions.map((question) => (
+                                                <Button
+                                                    key={question}
+                                                    variant="outline"
+                                                    className="h-auto justify-start whitespace-normal py-3 text-left"
+                                                    disabled={!canSend}
+                                                    onClick={() => {
+                                                        lastSubmittedText.current = question;
+                                                        void sendMessage({ text: question });
+                                                    }}
+                                                >
+                                                    {question}
+                                                </Button>
+                                            ))}
+                                        </div>
+                                    ) : null}
                                 </div>
                             ) : (
                                 <MessageGroup className="gap-6">
@@ -492,6 +709,73 @@ export function WorkspaceChat({
                                                                 />
                                                             </MessageFooter>
                                                         ) : null}
+                                                        {!isAnimatingMessage ? (
+                                                            <MessageFooter className="mt-1 flex flex-wrap gap-1 px-0">
+                                                                {isUser ? (
+                                                                    <Button
+                                                                        variant="ghost"
+                                                                        size="icon-sm"
+                                                                        aria-label="Edit question"
+                                                                        onClick={() => handleEdit(message.id, getMessageText(message))}
+                                                                    >
+                                                                        <PencilIcon />
+                                                                    </Button>
+                                                                ) : (
+                                                                    <>
+                                                                        <Button
+                                                                            variant="ghost"
+                                                                            size="icon-sm"
+                                                                            aria-label="Copy answer"
+                                                                            onClick={() => void handleCopy(message.id, getMessageText(message))}
+                                                                        >
+                                                                            {copiedMessageId === message.id ? <CheckIcon /> : <ClipboardIcon />}
+                                                                        </Button>
+                                                                        <Button
+                                                                            variant="ghost"
+                                                                            size="icon-sm"
+                                                                            aria-label="Regenerate answer"
+                                                                            disabled={isStreaming || message.id !== latestAssistantId}
+                                                                            onClick={() => void handleRetry(message.id)}
+                                                                        >
+                                                                            <RefreshCwIcon />
+                                                                        </Button>
+                                                                        <Button
+                                                                            variant="ghost"
+                                                                            size="icon-sm"
+                                                                            aria-label="Mark answer helpful"
+                                                                            disabled={!conversationId}
+                                                                            onClick={() => conversationId && messageFeedback.mutate({ conversationId, messageId: message.id, feedback: "HELPFUL" })}
+                                                                        >
+                                                                            <ThumbsUpIcon />
+                                                                        </Button>
+                                                                        <Button
+                                                                            variant="ghost"
+                                                                            size="icon-sm"
+                                                                            aria-label="Mark answer not helpful"
+                                                                            disabled={!conversationId}
+                                                                            onClick={() => conversationId && messageFeedback.mutate({ conversationId, messageId: message.id, feedback: "NOT_HELPFUL" })}
+                                                                        >
+                                                                            <ThumbsDownIcon />
+                                                                        </Button>
+                                                                        <Button
+                                                                            variant="ghost"
+                                                                            size="icon-sm"
+                                                                            aria-label="Save answer as output"
+                                                                            disabled={!conversationId || saveMessage.isPending}
+                                                                            onClick={() => {
+                                                                                if (!conversationId) return;
+                                                                                saveMessage.mutate(
+                                                                                    { conversationId, messageId: message.id },
+                                                                                    { onSuccess: () => setSavedMessageId(message.id) },
+                                                                                );
+                                                                            }}
+                                                                        >
+                                                                            {savedMessageId === message.id ? <CheckIcon /> : <SaveIcon />}
+                                                                        </Button>
+                                                                    </>
+                                                                )}
+                                                            </MessageFooter>
+                                                        ) : null}
                                                     </MessageContent>
                                                 </Message>
                                             </MessageScrollerItem>
@@ -526,13 +810,18 @@ export function WorkspaceChat({
             </MessageScrollerProvider>
 
             {error ? (
-                <div className="border-t bg-destructive/5 px-4 py-2 text-sm text-destructive">
-                    {error.message}
+                <div role="alert" className="flex items-center justify-between gap-3 border-t bg-destructive/5 px-4 py-2 text-sm text-destructive">
+                    <span>{error.message}</span>
+                    {!(error instanceof ApiError && error.code === "CHAT_QUOTA_EXCEEDED") ? (
+                        <Button variant="outline" size="sm" onClick={() => void handleRecover()}>
+                            Recover
+                        </Button>
+                    ) : null}
                 </div>
             ) : null}
 
             <ChatComposer
-                disabled={createConversation.isPending || !canSend}
+                disabled={!canSend}
                 isStreaming={isStreaming}
                 groundingMode={chatPrefs.groundingMode}
                 onGroundingModeChange={(mode) =>
@@ -542,10 +831,67 @@ export function WorkspaceChat({
                 selectionWarning={selectionWarning}
                 value={composerDraft}
                 onValueChange={(value) => setComposerDraft(workspaceId, value)}
+                onStop={() => void handleStop()}
+                onSourceAction={() => {
+                    const notebookState = useNotebookUiStore.getState();
+                    notebookState.setPanelCollapsed(workspaceId, "sources", false);
+                    notebookState.setMobileTab(workspaceId, "sources");
+                }}
+                editing={editingMessageId !== null}
+                onCancelEdit={() => {
+                    setEditingMessageId(null);
+                    setComposerDraft(workspaceId, "");
+                }}
                 onSubmit={(text) => {
-                    void sendMessage({ text });
+                    lastSubmittedText.current = text;
+                    const messageId = editingMessageId;
+                    setEditingMessageId(null);
+                    void sendMessage(messageId ? { text, messageId } : { text });
                 }}
             />
+
+            <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Rename conversation</DialogTitle>
+                        <DialogDescription>Use a short title that makes this research thread easy to find.</DialogDescription>
+                    </DialogHeader>
+                    <Input
+                        value={renameTitle}
+                        maxLength={120}
+                        autoFocus
+                        onChange={(event) => setRenameTitle(event.target.value)}
+                        onKeyDown={(event) => {
+                            if (event.key === "Enter") void handleRenameConversation();
+                        }}
+                    />
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setRenameOpen(false)}>Cancel</Button>
+                        <Button disabled={!renameTitle.trim() || renameConversation.isPending} onClick={() => void handleRenameConversation()}>
+                            Save
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Delete this conversation?</AlertDialogTitle>
+                        <AlertDialogDescription>This removes the full message history and cannot be undone.</AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                            variant="destructive"
+                            disabled={deleteConversation.isPending}
+                            onClick={() => void handleDeleteConversation()}
+                        >
+                            Delete
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </div>
     );
 }

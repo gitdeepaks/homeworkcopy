@@ -4,7 +4,7 @@ import {
     groundingModeSchema,
     type GroundingMode,
 } from "@homeworkcopy/contracts";
-import { BookOpenIcon, Loader2Icon, SendIcon } from "lucide-react";
+import { BookOpenIcon, SendIcon, SquareIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -18,6 +18,10 @@ type ChatComposerProps = {
     selectionWarning?: string;
     value: string;
     onValueChange: (value: string) => void;
+    onStop: () => void;
+    onSourceAction: () => void;
+    editing?: boolean;
+    onCancelEdit?: () => void;
 };
 
 export function ChatComposer({
@@ -30,6 +34,10 @@ export function ChatComposer({
     selectionWarning,
     value,
     onValueChange,
+    onStop,
+    onSourceAction,
+    editing = false,
+    onCancelEdit,
 }: ChatComposerProps) {
     function handleSubmit(event: React.FormEvent) {
         event.preventDefault();
@@ -57,7 +65,7 @@ export function ChatComposer({
                                     groundingModeSchema.parse(event.target.value),
                                 )
                             }
-                            disabled={disabled || isStreaming}
+                            disabled={isStreaming}
                             className="h-8 rounded-md border bg-paper px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         >
                             <option value="notebook">Notebook only</option>
@@ -70,12 +78,21 @@ export function ChatComposer({
                 </div>
 
                 {selectionWarning ? (
-                    <p
-                        role="alert"
-                        className="text-xs text-amber-700 dark:text-amber-300"
-                    >
-                        {selectionWarning}
-                    </p>
+                    <div className="flex items-center justify-between gap-2 text-xs text-amber-700 dark:text-amber-300">
+                        <p role="alert">{selectionWarning}</p>
+                        <Button type="button" variant="link" size="sm" onClick={onSourceAction}>
+                            Choose sources
+                        </Button>
+                    </div>
+                ) : null}
+
+                {editing ? (
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        <span>Editing your question. Sending will replace later answers.</span>
+                        <Button type="button" variant="ghost" size="sm" onClick={onCancelEdit}>
+                            Cancel
+                        </Button>
+                    </div>
                 ) : null}
 
                 <div className="flex items-end gap-2">
@@ -91,19 +108,22 @@ export function ChatComposer({
                                 handleSubmit(event);
                             }
                         }}
-                        disabled={disabled || isStreaming}
+                        disabled={isStreaming}
                     />
-                    <Button
-                        type="submit"
-                        size="icon"
-                        disabled={disabled || isStreaming || !value.trim()}
-                    >
-                        {isStreaming ? (
-                            <Loader2Icon className="animate-spin" />
-                        ) : (
+                    {isStreaming ? (
+                        <Button type="button" size="icon" variant="destructive" onClick={onStop} aria-label="Stop generating">
+                            <SquareIcon />
+                        </Button>
+                    ) : (
+                        <Button
+                            type="submit"
+                            size="icon"
+                            disabled={disabled || !value.trim()}
+                            aria-label="Send message"
+                        >
                             <SendIcon />
-                        )}
-                    </Button>
+                        </Button>
+                    )}
                 </div>
             </div>
         </form>

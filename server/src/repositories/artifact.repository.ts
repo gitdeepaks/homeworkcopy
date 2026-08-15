@@ -24,6 +24,7 @@ export type CreateArtifactData = {
     title: string;
     sourceIds: string[];
     status?: ArtifactRecord["status"];
+    content?: Prisma.InputJsonValue;
     metadata?: Prisma.InputJsonValue;
 };
 
@@ -53,6 +54,7 @@ export function createArtifactRecord(data: CreateArtifactData) {
             title: data.title,
             sourceIds: data.sourceIds,
             status: data.status ?? "PENDING",
+            content: data.content,
             metadata: data.metadata,
         },
         select: artifactSelect,

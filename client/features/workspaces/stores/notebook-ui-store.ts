@@ -201,7 +201,7 @@ export const useNotebookUiStore = create<NotebookUiState>()(
                             activeCitation: null,
                             citationSequence: [],
                             composerDraft: "",
-                            activeConversationId: null,
+                            activeConversationId: view.activeConversationId,
                         },
                     ]),
                 ),

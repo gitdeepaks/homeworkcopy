@@ -19,6 +19,7 @@ model User {
   sessions      Session[]
   accounts      Account[]
   workspaces    Workspace[]
+  chatUsage     ChatUsage[]
 
   @@unique([email])
   @@map("user")
@@ -183,6 +184,11 @@ enum MessageRole {
   ASSISTANT
 }
 
+enum MessageFeedback {
+  HELPFUL
+  NOT_HELPFUL
+}
+
 model Conversation {
   id                  String    @id @default(cuid())
   workspaceId         String
@@ -190,6 +196,9 @@ model Conversation {
   summary             String?
   summaryMessageCount Int       @default(0)
   summarizedAt        DateTime?
+  generationLeaseId   String?
+  generationLeaseExpiresAt DateTime?
+  historyRevision     Int       @default(0)
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
   workspace           Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
@@ -207,12 +216,36 @@ model Message {
   content        String
   citations      Json?
   grounding      Json?
+  clientMessageId String?
+  retryOfId       String?
+  supersededAt    DateTime?
+  feedback        MessageFeedback?
   createdAt      DateTime     @default(now())
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  retryOf         Message?     @relation("MessageRetry", fields: [retryOfId], references: [id], onDelete: SetNull)
+  retries         Message[]    @relation("MessageRetry")
 
   @@index([conversationId])
   @@index([conversationId, createdAt])
+  @@index([retryOfId])
+  @@unique([conversationId, clientMessageId])
   @@map("message")
+}
+
+model ChatUsage {
+  id           String   @id @default(cuid())
+  userId       String
+  periodStart  DateTime
+  requestCount Int      @default(0)
+  inputTokens  Int      @default(0)
+  outputTokens Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, periodStart])
+  @@index([periodStart])
+  @@map("chat_usage")
 }
 
 enum ArtifactType {

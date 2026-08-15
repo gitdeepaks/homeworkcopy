@@ -112,6 +112,7 @@ export const summarizeConversation = inngest.createFunction(
   {
     id: "summarize-conversation",
     retries: 2,
+    concurrency: { limit: 1, key: "event.data.conversationId" },
     triggers: [{ event: "conversation/summarize" }],
   },
   async ({ event, step }) => {

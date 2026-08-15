@@ -32,6 +32,9 @@ export const NOTEBOOK_SOURCE_MAX = 100;
 export const NOTEBOOK_PROCESSING_MAX = 5;
 export const SOURCE_PROCESSING_VERSION = 1;
 export const RETRIEVAL_VERSION = "hybrid-v1";
+export const CHAT_MESSAGE_MAX_LENGTH = 20_000;
+export const CHAT_HISTORY_MAX_MESSAGES = 100;
+export const CHAT_WEB_QUERY_MAX_LENGTH = 500;
 
 export const sourceProcessingStageSchema = z.enum([
     "QUEUED",
@@ -154,6 +157,21 @@ export type GroundingMode = z.infer<typeof groundingModeSchema>;
 export type SourceSelection = z.infer<typeof sourceSelectionSchema>;
 export type GroundingRequest = z.infer<typeof groundingRequestSchema>;
 export type GroundingSnapshot = z.infer<typeof groundingSnapshotSchema>;
+
+export const chatTriggerSchema = z.enum([
+    "submit-message",
+    "regenerate-message",
+]);
+export const messageFeedbackSchema = z.enum(["HELPFUL", "NOT_HELPFUL"]);
+export const chatGuideSchema = z.object({
+    overview: z.string().min(1),
+    questions: z.array(z.string().min(1)).min(3).max(4),
+    sourceIds: uniqueSourceIdsSchema.min(1),
+});
+
+export type ChatTrigger = z.infer<typeof chatTriggerSchema>;
+export type MessageFeedback = z.infer<typeof messageFeedbackSchema>;
+export type ChatGuide = z.infer<typeof chatGuideSchema>;
 
 const citationBaseSchema = z.object({
     label: z.string().regex(/^(?:[1-9]\d*|W[1-9]\d*)$/),

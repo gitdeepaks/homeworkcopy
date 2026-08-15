@@ -72,3 +72,15 @@ export class WebSearchUnavailableError extends AppError {
         this.name = "WebSearchUnavailableError";
     }
 }
+
+export class ChatQuotaExceededError extends AppError {
+    constructor(resetAt: string) {
+        super(
+            429,
+            "CHAT_QUOTA_EXCEEDED",
+            "Your daily chat allowance has been reached. Try again after the quota resets.",
+            { resetAt },
+        );
+        this.name = "ChatQuotaExceededError";
+    }
+}

@@ -28,3 +28,6 @@ export const CONVERSATION_SUMMARY_INTERVAL = 8;
 
 /** Max recent UI messages sent to the model when a rolling summary exists. */
 export const RECENT_MESSAGE_WINDOW = 12;
+
+/** Hard output ceiling used by chat generation and quota reservation. */
+export const CHAT_MAX_OUTPUT_TOKENS = 2_000;

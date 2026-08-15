@@ -8,6 +8,7 @@ import {
 import type { ChatCitation } from "../lib/types";
 import { useNotebookUiStore } from "@/features/workspaces/stores/notebook-ui-store";
 import { CitationPreview } from "./citation-preview";
+import { cn } from "@/lib/utils";
 
 type CitationMarkerProps = {
     index: number;
@@ -39,8 +40,13 @@ export function CitationMarker({
                 render={
                     <button
                         type="button"
-                        className="mx-0.5 inline-flex h-5 min-w-5 -translate-y-1 items-center justify-center border-b-2 border-primary bg-highlighter px-1 align-middle font-mono text-[10px] font-bold text-primary transition-colors hover:bg-highlighter/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-                        aria-label={`${unavailable ? "Unavailable citation" : "Source"} ${label}: ${citation.title}`}
+                        className={cn(
+                            "mx-0.5 inline-flex h-5 min-w-5 -translate-y-1 items-center justify-center border-b-2 px-1 align-middle font-mono text-[10px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
+                            citation.kind === "web"
+                                ? "border-sky-600 bg-sky-500/15 text-sky-700 hover:bg-sky-500/25 dark:text-sky-300"
+                                : "border-primary bg-highlighter text-primary hover:bg-highlighter/80",
+                        )}
+                        aria-label={`${unavailable ? "Unavailable citation" : citation.kind === "web" ? "Web citation" : "Notebook citation"} ${label}: ${citation.title}`}
                         aria-haspopup="dialog"
                         onClick={() =>
                             openCitation(workspaceId, citation, citations)

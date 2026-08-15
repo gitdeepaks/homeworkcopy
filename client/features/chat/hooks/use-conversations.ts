@@ -6,7 +6,12 @@ import {
     deleteConversation,
     listConversationMessages,
     listConversations,
+    renameConversation,
+    setMessageFeedback,
+    saveMessageAsOutput,
+    getChatGuide,
 } from "../lib/api";
+import type { MessageFeedback, SourceSelection } from "@homeworkcopy/contracts";
 
 export function chatKeys(workspaceId: string) {
     return {
@@ -63,6 +68,63 @@ export function useDeleteConversation(workspaceId: string) {
                 queryKey: chatKeys(workspaceId).all,
             });
         },
+    });
+}
+
+export function useRenameConversation(workspaceId: string) {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: (input: { conversationId: string; title: string }) =>
+            renameConversation(workspaceId, input.conversationId, input.title),
+        onSuccess: () =>
+            queryClient.invalidateQueries({
+                queryKey: chatKeys(workspaceId).conversations(),
+            }),
+    });
+}
+
+export function useMessageFeedback(workspaceId: string) {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: (input: {
+            conversationId: string;
+            messageId: string;
+            feedback: MessageFeedback;
+        }) =>
+            setMessageFeedback(
+                workspaceId,
+                input.conversationId,
+                input.messageId,
+                input.feedback,
+            ),
+        onSuccess: (_, input) =>
+            queryClient.invalidateQueries({
+                queryKey: chatKeys(workspaceId).messages(input.conversationId),
+            }),
+    });
+}
+
+export function useSaveMessageAsOutput(workspaceId: string) {
+    return useMutation({
+        mutationFn: (input: { conversationId: string; messageId: string }) =>
+            saveMessageAsOutput(
+                workspaceId,
+                input.conversationId,
+                input.messageId,
+            ),
+    });
+}
+
+export function useChatGuide(
+    workspaceId: string,
+    selection: SourceSelection,
+    enabled: boolean,
+) {
+    return useQuery({
+        queryKey: ["chat", workspaceId, "guide", selection] as const,
+        queryFn: () => getChatGuide(workspaceId, selection),
+        enabled,
+        staleTime: 5 * 60 * 1_000,
     });
 }
 

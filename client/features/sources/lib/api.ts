@@ -127,7 +127,12 @@ export async function uploadPdfSource(
 
     if (!response.ok) {
         const parsed = apiErrorResponseSchema.safeParse(data);
-        throw new ApiError(response.status, parsed.success ? parsed.data.error.message : "Upload failed", parsed.success ? parsed.data.error.details : undefined);
+        throw new ApiError(
+            response.status,
+            parsed.success ? parsed.data.error.code : "UPLOAD_FAILED",
+            parsed.success ? parsed.data.error.message : "Upload failed",
+            parsed.success ? parsed.data.error.details : undefined,
+        );
     }
 
     return sourceSchema.parse(data);

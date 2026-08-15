@@ -4,6 +4,10 @@ import {
     deleteConversation,
     listConversationMessages,
     listConversations,
+    renameConversation,
+    setMessageFeedback,
+    saveMessageAsOutput,
+    getChatGuide,
     streamChat,
 } from "../controllers/chat.controller.js";
 import { asyncHandler } from "../utils/async-handler.js";
@@ -17,6 +21,18 @@ conversationRoutes.get(
     "/:conversationId/messages",
     asyncHandler(listConversationMessages),
 );
+conversationRoutes.patch(
+    "/:conversationId",
+    asyncHandler(renameConversation),
+);
+conversationRoutes.put(
+    "/:conversationId/messages/:messageId/feedback",
+    asyncHandler(setMessageFeedback),
+);
+conversationRoutes.post(
+    "/:conversationId/messages/:messageId/output",
+    asyncHandler(saveMessageAsOutput),
+);
 conversationRoutes.delete(
     "/:conversationId",
     asyncHandler(deleteConversation),
@@ -25,3 +41,4 @@ conversationRoutes.delete(
 export const chatRoutes = Router({ mergeParams: true });
 
 chatRoutes.post("/", chatRateLimit, asyncHandler(streamChat));
+chatRoutes.post("/guide", chatRateLimit, asyncHandler(getChatGuide));
