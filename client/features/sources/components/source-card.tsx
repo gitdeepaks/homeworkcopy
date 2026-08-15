@@ -113,7 +113,7 @@ export function SourceCard({
             </CardHeader>
 
             <CardContent className="relative flex items-center justify-between gap-3">
-                <SourceStatusBadge status={source.status} />
+                <SourceStatusBadge status={source.status} stage={source.processingStage} />
                 {source.content ? (
                     <p className="line-clamp-1 min-w-0 flex-1 text-right text-xs text-muted-foreground">
                         {source.content.slice(0, 120)}

@@ -108,3 +108,22 @@ export async function uploadPdfToCloudinary(
         resourceType: result.resource_type === "image" ? "image" : "raw",
     };
 }
+
+export async function deleteCloudinaryObject(
+    publicId: string,
+    resourceType: "raw" | "image",
+): Promise<void> {
+    if (!cloudName || !apiKey || !apiSecret) {
+        throw new ValidationError("Cloudinary cleanup is not configured on the server");
+    }
+    cloudinary.config({
+        cloud_name: cloudName,
+        api_key: apiKey,
+        api_secret: apiSecret,
+        secure: true,
+    });
+    await cloudinary.uploader.destroy(publicId, {
+        resource_type: resourceType,
+        invalidate: true,
+    });
+}

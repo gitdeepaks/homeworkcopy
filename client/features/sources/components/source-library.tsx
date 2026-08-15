@@ -50,6 +50,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { ApiError } from "@/shared/lib/api";
+import { sourceStatusSchema, sourceTypeSchema } from "@homeworkcopy/contracts";
 import {
     useBulkDeleteSources,
     useDeleteSource,
@@ -62,7 +63,7 @@ import {
     SOURCE_TYPE_LABELS,
     SOURCE_TYPES,
 } from "../lib/constants";
-import type { Source, SourceFilters, SourceStatus, SourceType } from "../lib/types";
+import type { Source, SourceFilters } from "../lib/types";
 import { AddSourceDialog } from "./add-source-dialog";
 import { SourceCard } from "./source-card";
 
@@ -144,15 +145,13 @@ export function SourceLibrary({ workspaceId }: SourceLibraryProps) {
                     <div className="flex flex-wrap items-center gap-2">
                         <Select
                             value={filters.type ?? "all"}
-                            onValueChange={(value) =>
+                            onValueChange={(value) => {
+                                const parsed = sourceTypeSchema.safeParse(value);
                                 setFilters((current) => ({
                                     ...current,
-                                    type:
-                                        value === "all"
-                                            ? undefined
-                                            : (value as SourceType),
-                                }))
-                            }
+                                    type: parsed.success ? parsed.data : undefined,
+                                }));
+                            }}
                         >
                             <SelectTrigger className="w-[130px] rounded-full">
                                 <SelectValue placeholder="Type" />
@@ -169,15 +168,13 @@ export function SourceLibrary({ workspaceId }: SourceLibraryProps) {
 
                         <Select
                             value={filters.status ?? "all"}
-                            onValueChange={(value) =>
+                            onValueChange={(value) => {
+                                const parsed = sourceStatusSchema.safeParse(value);
                                 setFilters((current) => ({
                                     ...current,
-                                    status:
-                                        value === "all"
-                                            ? undefined
-                                            : (value as SourceStatus),
-                                }))
-                            }
+                                    status: parsed.success ? parsed.data : undefined,
+                                }));
+                            }}
                         >
                             <SelectTrigger className="w-[130px] rounded-full">
                                 <SelectValue placeholder="Status" />

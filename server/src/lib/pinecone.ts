@@ -99,6 +99,7 @@ export type VectorMetadata = {
     chunkIndex: number;
     sourceTitle: string;
     sourceType: string;
+    processingVersion: number;
     text: string;
     page?: number;
     timestamp?: number;
@@ -144,6 +145,20 @@ export async function deleteSourceVectors(
     const index = await getPineconeIndex();
     await index.namespace(workspaceId).deleteMany({
         filter: { sourceId: { $eq: sourceId } },
+    });
+}
+
+export async function deleteSourceVersionVectors(
+    workspaceId: string,
+    sourceId: string,
+    processingVersion: number,
+) {
+    const index = await getPineconeIndex();
+    await index.namespace(workspaceId).deleteMany({
+        filter: {
+            sourceId: { $eq: sourceId },
+            processingVersion: { $eq: processingVersion },
+        },
     });
 }
 

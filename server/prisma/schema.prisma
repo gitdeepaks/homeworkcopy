@@ -121,6 +121,19 @@ enum SourceStatus {
   PROCESSING
   READY
   FAILED
+  DELETING
+}
+
+enum SourceProcessingStage {
+  QUEUED
+  UPLOADING
+  EXTRACTING
+  CHUNKING
+  EMBEDDING
+  INDEXING
+  READY
+  FAILED
+  CLEANING_UP
 }
 
 model Source {
@@ -131,6 +144,10 @@ model Source {
   content     String?
   url         String?
   status      SourceStatus  @default(PENDING)
+  processingStage SourceProcessingStage @default(QUEUED)
+  processingVersion Int @default(1)
+  contentChecksum String?
+  idempotencyKey String?
   metadata    Json?
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
@@ -140,6 +157,8 @@ model Source {
   @@index([workspaceId])
   @@index([workspaceId, type])
   @@index([workspaceId, status])
+  @@unique([workspaceId, contentChecksum])
+  @@unique([workspaceId, idempotencyKey])
   @@map("source")
 }
 
@@ -150,6 +169,7 @@ model SourceChunk {
   content    String
   tokenCount Int?
   metadata   Json?
+  processingVersion Int @default(1)
   createdAt  DateTime @default(now())
   source     Source   @relation(fields: [sourceId], references: [id], onDelete: Cascade)
 

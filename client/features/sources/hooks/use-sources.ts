@@ -66,7 +66,8 @@ export function useSources(
             const hasProcessing = query.state.data?.some(
                 (source) =>
                     source.status === "PENDING" ||
-                    source.status === "PROCESSING",
+                    source.status === "PROCESSING" ||
+                    source.status === "DELETING",
             );
             return hasProcessing ? 3000 : false;
         },
@@ -81,7 +82,7 @@ export function useSource(workspaceId: string, sourceId: string) {
             !(error instanceof ApiError && error.status === 404),
         refetchInterval: (query) => {
             const status = query.state.data?.status;
-            return status === "PENDING" || status === "PROCESSING"
+            return status === "PENDING" || status === "PROCESSING" || status === "DELETING"
                 ? 3000
                 : false;
         },
@@ -92,8 +93,10 @@ export function useCreateSource(workspaceId: string) {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: (input: CreateSourceInput) =>
-            createSource(workspaceId, input),
+        mutationFn: ({ input, idempotencyKey }: {
+            input: CreateSourceInput;
+            idempotencyKey?: string;
+        }) => createSource(workspaceId, input, idempotencyKey),
         onSuccess: () => {
             void queryClient.invalidateQueries({
                 queryKey: sourceKeys(workspaceId).all,
@@ -109,10 +112,12 @@ export function useUploadPdfSource(workspaceId: string) {
         mutationFn: ({
             file,
             title,
+            idempotencyKey,
         }: {
             file: File;
             title?: string;
-        }) => uploadPdfSource(workspaceId, file, title),
+            idempotencyKey?: string;
+        }) => uploadPdfSource(workspaceId, file, title, idempotencyKey),
         onSuccess: () => {
             void queryClient.invalidateQueries({
                 queryKey: sourceKeys(workspaceId).all,
@@ -125,8 +130,10 @@ export function useImportWebsiteSource(workspaceId: string) {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: (input: ImportWebsiteInput) =>
-            importWebsiteSource(workspaceId, input),
+        mutationFn: ({ input, idempotencyKey }: {
+            input: ImportWebsiteInput;
+            idempotencyKey?: string;
+        }) => importWebsiteSource(workspaceId, input, idempotencyKey),
         onSuccess: () => {
             void queryClient.invalidateQueries({
                 queryKey: sourceKeys(workspaceId).all,
@@ -139,8 +146,10 @@ export function useImportYoutubeSource(workspaceId: string) {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: (input: ImportYoutubeInput) =>
-            importYoutubeSource(workspaceId, input),
+        mutationFn: ({ input, idempotencyKey }: {
+            input: ImportYoutubeInput;
+            idempotencyKey?: string;
+        }) => importYoutubeSource(workspaceId, input, idempotencyKey),
         onSuccess: () => {
             void queryClient.invalidateQueries({
                 queryKey: sourceKeys(workspaceId).all,

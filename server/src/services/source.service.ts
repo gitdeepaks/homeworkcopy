@@ -1,21 +1,22 @@
 import { z } from "zod";
-import { uploadPdfToCloudinary } from "../lib/cloudinary.js";
-import { extractPdfFromBuffer } from "../lib/pdf.js";
-import { scrapeWebsite } from "../lib/firecrawl.js";
-import { enqueueSourceProcessing } from "../lib/source-events.js";
+import { deleteCloudinaryObject, uploadPdfToCloudinary } from "../lib/cloudinary.js";
+import { enqueueSourceDeletion, enqueueSourceProcessing } from "../lib/source-events.js";
 import { logger } from "../lib/logger.js";
-import { fetchYoutubeTranscript } from "../lib/youtube.js";
 import {
     createSourceRecord,
+    beginSourceReprocessing,
     deleteSourceRecord,
     findSourceByIdAndWorkspaceId,
+    findSourceById,
     findSourcesByIdsAndWorkspaceId,
     findSourcesByWorkspaceId,
+    findSourceByChecksum,
+    findSourceByIdempotencyKey,
     updateSourceRecord,
     type SourceRecord,
 } from "../repositories/source.repository.js";
 import { getWorkspaceByIdForUser } from "./workspace.service.js";
-import { NotFoundError } from "../types/app-error.js";
+import { ConflictError, NotFoundError } from "../types/app-error.js";
 import type { SourceSelection } from "@homeworkcopy/contracts";
 import type {
     CreateSourceInput,
@@ -31,6 +32,11 @@ import {
     removeSourceFromIndex,
 } from "./source-processing.service.js";
 import { validateGroundingSourceCandidates } from "./grounding-source-selection.js";
+import {
+    canonicalizeSourceUrl,
+    checksumContent,
+    verifyPdfUpload,
+} from "../lib/source-ingestion.js";
 
 const PROCESSING_QUEUE_UNAVAILABLE =
     "Source processing could not be queued. Check the background worker and retry.";
@@ -45,12 +51,39 @@ const PROCESSING_QUEUE_UNAVAILABLE =
 async function createAndProcessSource(
     data: Parameters<typeof createSourceRecord>[0],
 ) {
-    const source = await createSourceRecord(data);
+    if (data.idempotencyKey) {
+        const existing = await findSourceByIdempotencyKey(data.workspaceId, data.idempotencyKey);
+        if (existing) return existing;
+    }
+    if (data.contentChecksum) {
+        const duplicate = await findSourceByChecksum(data.workspaceId, data.contentChecksum);
+        if (duplicate) {
+            throw new ConflictError(`This source already exists as “${duplicate.title}”`);
+        }
+    }
+
+    let source: SourceRecord;
+    try {
+        source = await createSourceRecord(data);
+    } catch (error) {
+        if (data.idempotencyKey) {
+            const existing = await findSourceByIdempotencyKey(data.workspaceId, data.idempotencyKey);
+            if (existing) return existing;
+        }
+        if (data.contentChecksum) {
+            const duplicate = await findSourceByChecksum(data.workspaceId, data.contentChecksum);
+            if (duplicate) {
+                throw new ConflictError(`This source already exists as “${duplicate.title}”`);
+            }
+        }
+        throw error;
+    }
 
     try {
         await enqueueSourceProcessing({
             sourceId: source.id,
             workspaceId: source.workspaceId,
+            processingVersion: source.processingVersion,
         });
     } catch (error) {
         logger.error(
@@ -62,11 +95,16 @@ async function createAndProcessSource(
             "source processing enqueue failed",
         );
 
-        return markSourceFailed(
+        await markSourceFailed(
             source.id,
             new Error(PROCESSING_QUEUE_UNAVAILABLE),
             source.metadata,
+            source.processingVersion,
+            "QUEUE_UNAVAILABLE",
         );
+        const failedSource = await findSourceById(source.id);
+        if (!failedSource) throw new Error("Queued source no longer exists");
+        return failedSource;
     }
 
     return source;
@@ -156,6 +194,7 @@ export async function createTextOrMarkdownSource(
     workspaceId: string,
     userId: string,
     input: CreateSourceInput,
+    idempotencyKey?: string,
 ) {
     await getWorkspaceByIdForUser(workspaceId, userId);
 
@@ -165,13 +204,13 @@ export async function createTextOrMarkdownSource(
         title: input.title,
         content: input.content,
         status: "PENDING",
+        contentChecksum: checksumContent(input.content),
+        idempotencyKey,
     });
 }
 
 /**
- * Uploads a PDF to Cloudinary, optionally extracts text, and queues processing.
- *
- * Text extraction at upload time is best-effort; Inngest retries from Cloudinary if it fails.
+ * Validates and uploads a PDF to durable storage, then queues extraction.
  *
  * @param workspaceId - Workspace to attach the source to
  * @param userId - Authenticated user's id
@@ -185,40 +224,56 @@ export async function uploadPdfSource(
     userId: string,
     file: Express.Multer.File,
     title?: string,
+    idempotencyKey?: string,
 ) {
     await getWorkspaceByIdForUser(workspaceId, userId);
+    verifyPdfUpload(file);
+
+    const contentChecksum = checksumContent(file.buffer);
+    if (idempotencyKey) {
+        const existing = await findSourceByIdempotencyKey(workspaceId, idempotencyKey);
+        if (existing) return existing;
+    }
+    const duplicate = await findSourceByChecksum(workspaceId, contentChecksum);
+    if (duplicate) throw new ConflictError(`This PDF already exists as “${duplicate.title}”`);
 
     const upload = await uploadPdfToCloudinary(
         file.buffer,
         file.originalname,
     );
 
-    let content: string | null = null;
-    let pageCount: number | undefined;
-
     try {
-        const extracted = await extractPdfFromBuffer(file.buffer);
-        content = extracted.text;
-        pageCount = extracted.pageCount;
-    } catch {
-        // Inngest will retry extraction from Cloudinary if upload-time parse fails.
+        const created = await createAndProcessSource({
+            workspaceId,
+            type: "PDF",
+            title:
+                title?.trim() ||
+                file.originalname.replace(/\.pdf$/i, "").trim().slice(0, 200) ||
+                "Untitled PDF",
+            status: "PENDING",
+            processingStage: "QUEUED",
+            contentChecksum,
+            idempotencyKey,
+            metadata: {
+                fileUrl: upload.secureUrl,
+                fileName: upload.originalFilename,
+                fileSize: upload.bytes,
+                publicId: upload.publicId,
+                resourceType: upload.resourceType,
+                safetyCheck: "pdf-signature-verified",
+            },
+        });
+        const createdMetadata = z.record(z.string(), z.json()).safeParse(created.metadata).data ?? {};
+        if (createdMetadata.publicId !== upload.publicId) {
+            await deleteCloudinaryObject(upload.publicId, upload.resourceType);
+        }
+        return created;
+    } catch (error) {
+        await deleteCloudinaryObject(upload.publicId, upload.resourceType).catch((cleanupError) => {
+            logger.error({ cleanupError, publicId: upload.publicId }, "orphaned PDF cleanup failed");
+        });
+        throw error;
     }
-
-    return createAndProcessSource({
-        workspaceId,
-        type: "PDF",
-        title: title?.trim() || file.originalname.replace(/\.pdf$/i, ""),
-        content,
-        status: "PENDING",
-        metadata: {
-            fileUrl: upload.secureUrl,
-            fileName: upload.originalFilename,
-            fileSize: upload.bytes,
-            publicId: upload.publicId,
-            resourceType: upload.resourceType,
-            pageCount,
-        },
-    });
 }
 
 /**
@@ -234,20 +289,22 @@ export async function importWebsiteSource(
     workspaceId: string,
     userId: string,
     input: ImportWebsiteInput,
+    idempotencyKey?: string,
 ) {
     await getWorkspaceByIdForUser(workspaceId, userId);
-
-    const scraped = await scrapeWebsite(input.url);
+    const url = canonicalizeSourceUrl(input.url);
 
     return createAndProcessSource({
         workspaceId,
         type: "WEBSITE",
-        title: input.title || scraped.title || input.url,
-        content: scraped.markdown,
-        url: scraped.sourceUrl,
+        title: input.title || new URL(url).hostname,
+        url,
         status: "PENDING",
+        contentChecksum: checksumContent(url),
+        idempotencyKey,
         metadata: {
-            importedFrom: scraped.sourceUrl,
+            importedFrom: url,
+            sourceUrl: url,
         },
     });
 }
@@ -265,21 +322,25 @@ export async function importYoutubeSource(
     workspaceId: string,
     userId: string,
     input: ImportYoutubeInput,
+    idempotencyKey?: string,
 ) {
     await getWorkspaceByIdForUser(workspaceId, userId);
-
-    const transcript = await fetchYoutubeTranscript(input.url);
+    const url = canonicalizeSourceUrl(input.url);
+    const videoId = url.match(
+        /(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([\w-]{11})/,
+    )?.[1];
+    if (!videoId) throw new ConflictError("YouTube video identifier could not be resolved");
 
     return createAndProcessSource({
         workspaceId,
         type: "YOUTUBE",
-        title: input.title || `YouTube: ${transcript.videoId}`,
-        content: transcript.content,
-        url: input.url,
+        title: input.title || `YouTube: ${videoId}`,
+        url,
         status: "PENDING",
+        contentChecksum: checksumContent(`youtube:${videoId}`),
+        idempotencyKey,
         metadata: {
-            videoId: transcript.videoId,
-            transcriptSegments: transcript.segments,
+            videoId,
         },
     });
 }
@@ -299,9 +360,55 @@ export async function deleteSourceForWorkspace(
     sourceId: string,
     userId: string,
 ) {
-    await getSourceForWorkspace(workspaceId, sourceId, userId);
-    await removeSourceFromIndex(workspaceId, sourceId);
-    await deleteSourceRecord(sourceId);
+    const source = await getSourceForWorkspace(workspaceId, sourceId, userId);
+    if (source.status !== "DELETING") {
+        await updateSourceRecord(sourceId, {
+            status: "DELETING",
+            processingStage: "CLEANING_UP",
+        });
+    }
+    try {
+        await enqueueSourceDeletion({ workspaceId, sourceId });
+    } catch (error) {
+        const parsedMetadata = z.record(z.string(), z.json()).safeParse(source.metadata);
+        await updateSourceRecord(sourceId, {
+            metadata: {
+                ...(parsedMetadata.data ?? {}),
+                failureCode: "CLEANUP_FAILED",
+                cleanupError: "Cleanup could not be queued. Retry removal.",
+            },
+        });
+        logger.error({ error, workspaceId, sourceId }, "source cleanup enqueue failed");
+        throw error;
+    }
+}
+
+export async function cleanupSourceById(sourceId: string, workspaceId: string) {
+    const source = await findSourceByIdAndWorkspaceId(sourceId, workspaceId);
+    if (!source) return;
+
+    const metadata = z.record(z.string(), z.json()).safeParse(source.metadata).data ?? {};
+    const publicId = typeof metadata.publicId === "string" ? metadata.publicId : undefined;
+    const resourceType = metadata.resourceType === "image" ? "image" : "raw";
+    try {
+        await removeSourceFromIndex(workspaceId, sourceId);
+        if (publicId) await deleteCloudinaryObject(publicId, resourceType);
+        await deleteSourceRecord(sourceId);
+        logger.info(
+            { sourceId, workspaceId, binaryDeleted: Boolean(publicId) },
+            "source cleanup completed",
+        );
+    } catch (error) {
+        await updateSourceRecord(sourceId, {
+            metadata: {
+                ...metadata,
+                failureCode: "CLEANUP_FAILED",
+                cleanupError: "Source cleanup is incomplete. Retry removal.",
+            },
+        });
+        logger.error({ error, sourceId, workspaceId }, "source cleanup failed");
+        throw error;
+    }
 }
 
 /**
@@ -402,14 +509,20 @@ export async function reprocessSourceForWorkspace(
     const metadata = { ...(parsedMetadata.data ?? {}) };
 
     delete metadata.processingError;
+    delete metadata.failureCode;
+    delete metadata.cleanupError;
+    delete metadata.indexedAt;
+    delete metadata.chunkCount;
 
-    await updateSourceRecord(sourceId, {
-        status: "PENDING",
-        metadata,
-    });
+    const queuedSource = await beginSourceReprocessing(sourceId);
+    await updateSourceRecord(sourceId, { metadata });
 
     try {
-        await enqueueSourceProcessing({ sourceId, workspaceId });
+        await enqueueSourceProcessing({
+            sourceId,
+            workspaceId,
+            processingVersion: queuedSource.processingVersion,
+        });
     } catch (error) {
         logger.error(
             { error, sourceId, workspaceId },
@@ -419,6 +532,8 @@ export async function reprocessSourceForWorkspace(
             sourceId,
             new Error(PROCESSING_QUEUE_UNAVAILABLE),
             metadata,
+            queuedSource.processingVersion,
+            "QUEUE_UNAVAILABLE",
         );
     }
 }
@@ -438,6 +553,7 @@ export async function importWebSearchSource(
     workspaceId: string,
     userId: string,
     input: ImportWebSearchInput,
+    idempotencyKey?: string,
 ) {
     await getWorkspaceByIdForUser(workspaceId, userId);
 
@@ -448,6 +564,8 @@ export async function importWebSearchSource(
         content: input.content,
         url: input.url,
         status: "PENDING",
+        contentChecksum: checksumContent(input.content),
+        idempotencyKey,
         metadata: {
             importedFrom: "web-search",
             sourceUrl: input.url,

@@ -20,11 +20,17 @@ import {
     importWebSearchSchema,
     importWebsiteSchema,
     importYoutubeSchema,
+    idempotencyKeyHeaderSchema,
     listSourcesQuerySchema,
     reprocessSourcesSchema,
     sourceIdParamSchema,
     workspaceIdParamSchema,
+    uploadPdfFieldsSchema,
 } from "../validators/source.validator.js";
+
+function getIdempotencyKey(req: Request): string | undefined {
+    return idempotencyKeyHeaderSchema.parse(req.headers)["idempotency-key"];
+}
 
 export async function listSources(req: Request, res: Response) {
     const { workspaceId } = workspaceIdParamSchema.parse(req.params);
@@ -64,6 +70,7 @@ export async function createSource(req: Request, res: Response) {
         workspaceId,
         req.session.user.id,
         input,
+        getIdempotencyKey(req),
     );
     res.status(201).json(source);
 }
@@ -75,14 +82,14 @@ export async function uploadPdf(req: Request, res: Response) {
         throw new ValidationError("PDF file is required");
     }
 
-    const title =
-        typeof req.body.title === "string" ? req.body.title : undefined;
+    const { title } = uploadPdfFieldsSchema.parse(req.body);
 
     const source = await uploadPdfSource(
         workspaceId,
         req.session.user.id,
         req.file,
         title,
+        getIdempotencyKey(req),
     );
 
     res.status(201).json(source);
@@ -95,6 +102,7 @@ export async function importWebsite(req: Request, res: Response) {
         workspaceId,
         req.session.user.id,
         input,
+        getIdempotencyKey(req),
     );
     res.status(201).json(source);
 }
@@ -106,6 +114,7 @@ export async function importYoutube(req: Request, res: Response) {
         workspaceId,
         req.session.user.id,
         input,
+        getIdempotencyKey(req),
     );
     res.status(201).json(source);
 }
@@ -117,7 +126,7 @@ export async function deleteSource(req: Request, res: Response) {
         sourceId,
         req.session.user.id,
     );
-    res.status(204).send();
+    res.status(202).send();
 }
 
 export async function bulkDeleteSources(req: Request, res: Response) {
@@ -159,6 +168,7 @@ export async function importWebSearch(req: Request, res: Response) {
         workspaceId,
         req.session.user.id,
         input,
+        getIdempotencyKey(req),
     );
     res.status(201).json(source);
 }

@@ -25,20 +25,29 @@ import {
 import { chunkPages, chunkText } from "../lib/chunking.js";
 import { embedTexts } from "../lib/openai.js";
 import { extractPdfFromCloudinary } from "../lib/pdf.js";
+import { scrapeWebsite } from "../lib/firecrawl.js";
+import { fetchYoutubeTranscript } from "../lib/youtube.js";
+import { logger } from "../lib/logger.js";
+import {
+    enforceExtractedContentLimits,
+    getSafeProcessingFailure,
+    sourceChunkId,
+} from "../lib/source-ingestion.js";
 import {
     deleteSourceVectors,
+    deleteSourceVersionVectors,
     type VectorMetadata,
     upsertSourceVectors,
 } from "../lib/pinecone.js";
 import {
-    createSourceChunks,
     deleteChunksBySourceId,
     findChunksBySourceId,
+    replaceSourceChunksForProcessingVersion,
     type SourceChunkRecord,
 } from "../repositories/source-chunk.repository.js";
 import {
     findSourceById,
-    updateSourceRecord,
+    updateSourceForProcessingVersion,
     type SourceRecord,
 } from "../repositories/source.repository.js";
 
@@ -83,6 +92,28 @@ async function extractSourceText(source: SourceRecord) {
         };
     }
 
+    if (source.type === "WEBSITE" && source.url) {
+        const scraped = await scrapeWebsite(source.url);
+        enforceExtractedContentLimits(scraped.markdown);
+        return {
+            text: scraped.markdown,
+            pageCount: undefined,
+            pages: undefined,
+            transcriptSegments: undefined,
+        };
+    }
+
+    if (source.type === "YOUTUBE" && source.url) {
+        const transcript = await fetchYoutubeTranscript(source.url);
+        enforceExtractedContentLimits(transcript.content, transcript.segments.length);
+        return {
+            text: transcript.content,
+            pageCount: undefined,
+            pages: undefined,
+            transcriptSegments: transcript.segments,
+        };
+    }
+
     if (text) {
         const metadata = parseMetadata(source.metadata);
         return {
@@ -101,8 +132,23 @@ async function extractSourceText(source: SourceRecord) {
  * Sets a source's status to `PROCESSING` while the pipeline runs.
  *
  */
-export function markSourceProcessing(sourceId: string) {
-    return updateSourceRecord(sourceId, { status: "PROCESSING" });
+export async function markSourceProcessing(sourceId: string, processingVersion: number) {
+    const result = await updateSourceForProcessingVersion(sourceId, processingVersion, {
+        status: "PROCESSING",
+        processingStage: "EXTRACTING",
+    });
+    if (result.count === 0) throw new Error("Stale source processing job");
+    return result;
+}
+
+export async function markSourceStage(
+    sourceId: string,
+    processingVersion: number,
+    processingStage: SourceRecord["processingStage"],
+) {
+    const result = await updateSourceForProcessingVersion(sourceId, processingVersion, { processingStage });
+    if (result.count === 0) throw new Error("Stale source processing job");
+    return result;
 }
 
 /**
@@ -114,14 +160,21 @@ export async function markSourceFailed(
     sourceId: string,
     error: Error,
     existingMetadata: SourceRecord["metadata"],
+    processingVersion: number,
+    failureCode?: StoredSourceMetadata["failureCode"],
 ) {
     const metadata = parseMetadata(existingMetadata);
+    const failure = getSafeProcessingFailure(error);
 
-    return updateSourceRecord(sourceId, {
+    return updateSourceForProcessingVersion(sourceId, processingVersion, {
         status: "FAILED",
+        processingStage: "FAILED",
         metadata: {
             ...metadata,
-            processingError: error.message,
+            failureCode: failureCode ?? failure.code,
+            processingError: failureCode === "QUEUE_UNAVAILABLE"
+                ? "Source processing could not be queued. Retry the import."
+                : failure.message,
         },
     });
 }
@@ -137,22 +190,33 @@ export async function markSourceFailed(
  * @returns Extracted text plus page array (PDF only) for the chunking step
  *
  */
-export async function extractSourceContent(sourceId: string) {
+export async function extractSourceContent(sourceId: string, processingVersion: number) {
     const source = await findSourceById(sourceId);
     if (!source) {
         throw new Error("Source not found");
     }
+    if (source.processingVersion !== processingVersion || source.status === "DELETING") {
+        throw new Error("Stale source processing job");
+    }
 
     const extracted = await extractSourceText(source);
-    const metadata = parseMetadata(source.metadata);
 
-    await updateSourceRecord(sourceId, {
+    enforceExtractedContentLimits(extracted.text, extracted.transcriptSegments?.length);
+
+    const metadata = parseMetadata(source.metadata);
+    const nextMetadata: StoredSourceMetadata = {
+        ...metadata,
+        pageCount: extracted.pageCount ?? metadata.pageCount,
+        transcriptSegments: extracted.transcriptSegments ?? metadata.transcriptSegments,
+    };
+    await updateSourceForProcessingVersion(sourceId, processingVersion, {
         content: extracted.text,
-        metadata: {
-            ...metadata,
-            pageCount: extracted.pageCount ?? metadata.pageCount,
-        },
+        metadata: nextMetadata,
     });
+    logger.info(
+        { sourceId, processingVersion, characterCount: extracted.text.length },
+        "source extraction completed",
+    );
 
     return {
         sourceId,
@@ -160,7 +224,7 @@ export async function extractSourceContent(sourceId: string) {
         text: extracted.text,
         pages: extracted.pages,
         transcriptSegments: extracted.transcriptSegments,
-        source,
+        source: { ...source, content: extracted.text, metadata: nextMetadata },
     };
 }
 
@@ -184,9 +248,8 @@ export async function chunkSourceContent(
     text: string,
     pages?: string[],
     transcriptSegments?: TranscriptSegment[],
+    processingVersion = 1,
 ) {
-    await deleteChunksBySourceId(sourceId);
-
     const chunks = pages?.length
         ? chunkPages(pages)
         : transcriptSegments?.length
@@ -197,8 +260,11 @@ export async function chunkSourceContent(
         throw new Error("No chunks were generated from source content");
     }
 
-    return createSourceChunks(
+    const savedChunks = await replaceSourceChunksForProcessingVersion(
+        sourceId,
+        processingVersion,
         chunks.map((chunk) => ({
+            id: sourceChunkId(sourceId, processingVersion, chunk.index, chunk.content),
             sourceId,
             index: chunk.index,
             content: chunk.content,
@@ -206,8 +272,14 @@ export async function chunkSourceContent(
             metadata: chunk.metadata
                 ? sourceChunkMetadataSchema.parse(chunk.metadata)
                 : undefined,
+            processingVersion,
         })),
     );
+    logger.info(
+        { sourceId, processingVersion, chunkCount: savedChunks.length },
+        "source chunking completed",
+    );
+    return savedChunks;
 }
 
 /**
@@ -230,6 +302,7 @@ export async function chunkSourceContent(
 export async function embedAndIndexSource(
     source: SourceRecord,
     chunks: SourceChunkRecord[],
+    processingVersion: number,
 ) {
     const batchSize = 50;
     const records: PineconeRecord<VectorMetadata>[] = [];
@@ -237,11 +310,16 @@ export async function embedAndIndexSource(
     for (let i = 0; i < chunks.length; i += batchSize) {
         const batch = chunks.slice(i, i + batchSize);
         const embeddings = await embedTexts(batch.map((chunk) => chunk.content));
+        if (embeddings.length !== batch.length) {
+            throw new Error("Embedding provider returned an incomplete batch");
+        }
 
         for (let j = 0; j < batch.length; j += 1) {
             const chunk = batch[j];
             const embedding = embeddings[j];
-            if (!chunk || !embedding) continue;
+            if (!chunk || !embedding) {
+                throw new Error("Embedding provider returned an incomplete batch");
+            }
             const chunkMetadata = sourceChunkMetadataSchema.safeParse(chunk.metadata).data ?? {};
 
             records.push({
@@ -254,6 +332,7 @@ export async function embedAndIndexSource(
                     chunkIndex: chunk.index,
                     sourceTitle: source.title,
                     sourceType: source.type,
+                    processingVersion,
                     text: chunk.content.slice(0, 35000),
                     ...(typeof chunkMetadata.page === "number"
                         ? { page: chunkMetadata.page }
@@ -266,12 +345,14 @@ export async function embedAndIndexSource(
         }
     }
 
+    await markSourceStage(source.id, processingVersion, "INDEXING");
     await upsertSourceVectors(source.workspaceId, records);
 
     const metadata = parseMetadata(source.metadata);
 
-    return updateSourceRecord(source.id, {
+    const result = await updateSourceForProcessingVersion(source.id, processingVersion, {
         status: "READY",
+        processingStage: "READY",
         metadata: {
             ...metadata,
             chunkCount: chunks.length,
@@ -279,6 +360,19 @@ export async function embedAndIndexSource(
             processingError: undefined,
         },
     });
+    if (result.count === 0) {
+        await deleteSourceVersionVectors(
+            source.workspaceId,
+            source.id,
+            processingVersion,
+        );
+        throw new Error("Stale source processing job");
+    }
+    logger.info(
+        { sourceId: source.id, processingVersion, vectorCount: records.length },
+        "source indexing completed",
+    );
+    return result;
 }
 
 function chunkTranscriptSegments(segments: TranscriptSegment[]) {

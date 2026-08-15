@@ -8,6 +8,7 @@ export const sourceChunkSelect = {
     content: true,
     tokenCount: true,
     metadata: true,
+    processingVersion: true,
     createdAt: true,
 } as const;
 
@@ -16,11 +17,13 @@ export type SourceChunkRecord = Prisma.SourceChunkGetPayload<{
 }>;
 
 export type CreateSourceChunkData = {
+    id: string;
     sourceId: string;
     index: number;
     content: string;
     tokenCount?: number | null;
     metadata?: Prisma.InputJsonValue;
+    processingVersion: number;
 };
 
 export function deleteChunksBySourceId(sourceId: string) {
@@ -36,19 +39,66 @@ export function createSourceChunks(chunks: CreateSourceChunkData[]) {
 
     return prisma.sourceChunk.createManyAndReturn({
         data: chunks.map((chunk) => ({
+            id: chunk.id,
             sourceId: chunk.sourceId,
             index: chunk.index,
             content: chunk.content,
             tokenCount: chunk.tokenCount ?? null,
             metadata: chunk.metadata,
+            processingVersion: chunk.processingVersion,
         })),
         select: sourceChunkSelect,
+    });
+}
+
+export function replaceSourceChunksForProcessingVersion(
+    sourceId: string,
+    processingVersion: number,
+    chunks: CreateSourceChunkData[],
+) {
+    return prisma.$transaction(async (transaction) => {
+        const activeSource = await transaction.source.updateMany({
+            where: {
+                id: sourceId,
+                processingVersion,
+                status: "PROCESSING",
+            },
+            data: { processingStage: "CHUNKING" },
+        });
+        if (activeSource.count === 0) {
+            throw new Error("Stale source processing job");
+        }
+
+        await transaction.sourceChunk.deleteMany({ where: { sourceId } });
+        return transaction.sourceChunk.createManyAndReturn({
+            data: chunks.map((chunk) => ({
+                id: chunk.id,
+                sourceId: chunk.sourceId,
+                index: chunk.index,
+                content: chunk.content,
+                tokenCount: chunk.tokenCount ?? null,
+                metadata: chunk.metadata,
+                processingVersion: chunk.processingVersion,
+            })),
+            select: sourceChunkSelect,
+        });
     });
 }
 
 export function findChunksBySourceId(sourceId: string) {
     return prisma.sourceChunk.findMany({
         where: { sourceId },
+        select: sourceChunkSelect,
+        orderBy: { index: "asc" },
+    });
+}
+
+export function findChunksBySourceIdAndProcessingVersion(
+    sourceId: string,
+    processingVersion: number,
+) {
+    return prisma.sourceChunk.findMany({
+        where: { sourceId, processingVersion },
         select: sourceChunkSelect,
         orderBy: { index: "asc" },
     });

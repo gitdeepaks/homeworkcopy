@@ -1,10 +1,9 @@
 import multer from "multer";
-
-const MAX_PDF_SIZE_BYTES = 10 * 1024 * 1024;
+import { SOURCE_UPLOAD_MAX_BYTES } from "@homeworkcopy/contracts";
 
 export const pdfUpload = multer({
     storage: multer.memoryStorage(),
-    limits: { fileSize: MAX_PDF_SIZE_BYTES },
+    limits: { fileSize: SOURCE_UPLOAD_MAX_BYTES, files: 1 },
     fileFilter: (_req, file, callback) => {
         if (file.mimetype === "application/pdf") {
             callback(null, true);

@@ -5,6 +5,7 @@ export type SourceCreatedEvent = {
     data: {
         sourceId: string;
         workspaceId: string;
+        processingVersion?: number;
     };
 };
 
@@ -18,8 +19,14 @@ export type ConversationSummarizeEvent = {
     data: { conversationId: string; userId: string };
 };
 
+export type SourceDeleteEvent = {
+    name: "source/delete";
+    data: { sourceId: string; workspaceId: string };
+};
+
 export type InngestEvents =
     | SourceCreatedEvent
+    | SourceDeleteEvent
     | ArtifactGenerateEvent
     | ConversationSummarizeEvent;
 

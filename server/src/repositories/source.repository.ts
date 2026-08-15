@@ -1,5 +1,10 @@
-import type { Prisma } from "../generated/prisma/client.js";
+import { Prisma } from "../generated/prisma/client.js";
+import {
+    NOTEBOOK_PROCESSING_MAX,
+    NOTEBOOK_SOURCE_MAX,
+} from "@homeworkcopy/contracts";
 import prisma from "../lib/db.js";
+import { ConflictError } from "../types/app-error.js";
 import type { ListSourcesQuery } from "../validators/source.validator.js";
 
 export const sourceSelect = {
@@ -10,6 +15,9 @@ export const sourceSelect = {
     content: true,
     url: true,
     status: true,
+    processingStage: true,
+    processingVersion: true,
+    contentChecksum: true,
     metadata: true,
     createdAt: true,
     updatedAt: true,
@@ -26,6 +34,10 @@ export type CreateSourceData = {
     content?: string | null;
     url?: string | null;
     status?: SourceRecord["status"];
+    processingStage?: SourceRecord["processingStage"];
+    processingVersion?: number;
+    contentChecksum?: string | null;
+    idempotencyKey?: string | null;
     metadata?: Prisma.InputJsonValue;
 };
 
@@ -91,17 +103,43 @@ export function findExistingSourceIds(
 }
 
 export function createSourceRecord(data: CreateSourceData) {
-    return prisma.source.create({
-        data: {
-            workspaceId: data.workspaceId,
-            type: data.type,
-            title: data.title,
-            content: data.content ?? null,
-            url: data.url ?? null,
-            status: data.status ?? "PENDING",
-            metadata: data.metadata,
-        },
-        select: sourceSelect,
+    return prisma.$transaction(async (transaction) => {
+        await transaction.$executeRaw(
+            Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${data.workspaceId}, 0))`,
+        );
+        const sourceCount = await transaction.source.count({
+            where: { workspaceId: data.workspaceId, status: { not: "DELETING" } },
+        });
+        if (sourceCount >= NOTEBOOK_SOURCE_MAX) {
+            throw new ConflictError(
+                `This notebook has reached its ${NOTEBOOK_SOURCE_MAX}-source limit`,
+            );
+        }
+        const processingCount = await transaction.source.count({
+            where: { workspaceId: data.workspaceId, status: "PROCESSING" },
+        });
+        if (processingCount >= NOTEBOOK_PROCESSING_MAX) {
+            throw new ConflictError(
+                `Wait for one of the ${NOTEBOOK_PROCESSING_MAX} active imports to finish before adding more`,
+            );
+        }
+
+        return transaction.source.create({
+            data: {
+                workspaceId: data.workspaceId,
+                type: data.type,
+                title: data.title,
+                content: data.content ?? null,
+                url: data.url ?? null,
+                status: data.status ?? "PENDING",
+                processingStage: data.processingStage ?? "QUEUED",
+                processingVersion: data.processingVersion ?? 1,
+                contentChecksum: data.contentChecksum ?? null,
+                idempotencyKey: data.idempotencyKey ?? null,
+                metadata: data.metadata,
+            },
+            select: sourceSelect,
+        });
     });
 }
 
@@ -112,11 +150,41 @@ export function findSourceById(sourceId: string) {
     });
 }
 
+export function findSourceByIdempotencyKey(
+    workspaceId: string,
+    idempotencyKey: string,
+) {
+    return prisma.source.findUnique({
+        where: { workspaceId_idempotencyKey: { workspaceId, idempotencyKey } },
+        select: sourceSelect,
+    });
+}
+
+export function findSourceByChecksum(workspaceId: string, contentChecksum: string) {
+    return prisma.source.findUnique({
+        where: { workspaceId_contentChecksum: { workspaceId, contentChecksum } },
+        select: sourceSelect,
+    });
+}
+
+export function countSourcesByWorkspaceId(workspaceId: string) {
+    return prisma.source.count({ where: { workspaceId, status: { not: "DELETING" } } });
+}
+
+export function countProcessingSourcesByWorkspaceId(workspaceId: string) {
+    return prisma.source.count({
+        where: { workspaceId, status: "PROCESSING" },
+    });
+}
+
 export function updateSourceRecord(
     sourceId: string,
     data: {
         content?: string | null;
         status?: SourceRecord["status"];
+        processingStage?: SourceRecord["processingStage"];
+        processingVersion?: number;
+        contentChecksum?: string | null;
         metadata?: Prisma.InputJsonValue;
     },
 ) {
@@ -127,8 +195,34 @@ export function updateSourceRecord(
     });
 }
 
-export async function deleteSourceRecord(sourceId: string) {
-    await prisma.source.delete({
-        where: { id: sourceId },
+export function updateSourceForProcessingVersion(
+    sourceId: string,
+    processingVersion: number,
+    data: {
+        content?: string | null;
+        status?: SourceRecord["status"];
+        processingStage?: SourceRecord["processingStage"];
+        metadata?: Prisma.InputJsonValue;
+    },
+) {
+    return prisma.source.updateMany({
+        where: { id: sourceId, processingVersion, status: { not: "DELETING" } },
+        data,
     });
+}
+
+export function beginSourceReprocessing(sourceId: string) {
+    return prisma.source.update({
+        where: { id: sourceId },
+        data: {
+            status: "PENDING",
+            processingStage: "QUEUED",
+            processingVersion: { increment: 1 },
+        },
+        select: sourceSelect,
+    });
+}
+
+export async function deleteSourceRecord(sourceId: string) {
+    await prisma.source.deleteMany({ where: { id: sourceId } });
 }

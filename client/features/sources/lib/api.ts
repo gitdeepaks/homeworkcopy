@@ -52,13 +52,18 @@ export function getSourceChunks(workspaceId: string, sourceId: string) {
     );
 }
 
-export function createSource(workspaceId: string, input: CreateSourceInput) {
+export function createSource(
+    workspaceId: string,
+    input: CreateSourceInput,
+    idempotencyKey?: string,
+) {
     return apiFetchWithSchema(
         `/api/workspaces/${workspaceId}/sources`,
         sourceSchema,
         {
             method: "POST",
             body: JSON.stringify(input),
+            headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
         },
     );
 }
@@ -66,6 +71,7 @@ export function createSource(workspaceId: string, input: CreateSourceInput) {
 export function importWebsiteSource(
     workspaceId: string,
     input: ImportWebsiteInput,
+    idempotencyKey?: string,
 ) {
     return apiFetchWithSchema(
         `/api/workspaces/${workspaceId}/sources/import/website`,
@@ -73,6 +79,7 @@ export function importWebsiteSource(
         {
             method: "POST",
             body: JSON.stringify(input),
+            headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
         },
     );
 }
@@ -80,6 +87,7 @@ export function importWebsiteSource(
 export function importYoutubeSource(
     workspaceId: string,
     input: ImportYoutubeInput,
+    idempotencyKey?: string,
 ) {
     return apiFetchWithSchema(
         `/api/workspaces/${workspaceId}/sources/import/youtube`,
@@ -87,6 +95,7 @@ export function importYoutubeSource(
         {
             method: "POST",
             body: JSON.stringify(input),
+            headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
         },
     );
 }
@@ -95,6 +104,7 @@ export async function uploadPdfSource(
     workspaceId: string,
     file: File,
     title?: string,
+    idempotencyKey?: string,
 ) {
     const formData = new FormData();
     formData.append("file", file);
@@ -109,6 +119,7 @@ export async function uploadPdfSource(
             method: "POST",
             credentials: "include",
             body: formData,
+            headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
         },
     );
 

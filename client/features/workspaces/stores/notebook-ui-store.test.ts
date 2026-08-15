@@ -68,6 +68,21 @@ describe("notebook UI store", () => {
         expect(view.panelLayout.chat).toBe(50);
     });
 
+    test("atomically selects every successfully queued source", () => {
+        const state = useNotebookUiStore.getState();
+        state.addSelectedSourceId("notebook-a", "source-from-all-ready");
+        expect(selectNotebookViewState(useNotebookUiStore.getState(), "notebook-a").sourceSelectionMode)
+            .toBe("all-ready");
+        useNotebookUiStore.getState().setSourceSelectionMode("notebook-a", "custom");
+        state.addSelectedSourceId("notebook-a", "source-1");
+        useNotebookUiStore.getState().addSelectedSourceId("notebook-a", "source-2");
+        useNotebookUiStore.getState().addSelectedSourceId("notebook-a", "source-1");
+
+        const view = selectNotebookViewState(useNotebookUiStore.getState(), "notebook-a");
+        expect(view.sourceSelectionMode).toBe("custom");
+        expect(view.selectedSourceIds).toEqual(["source-1", "source-2"]);
+    });
+
     test("opens and closes a citation without changing the chat draft", () => {
         const state = useNotebookUiStore.getState();
         state.setComposerDraft("notebook-a", "Keep this question");

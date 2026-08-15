@@ -16,9 +16,21 @@ import { inngest } from "../inngest/client.js";
 export async function enqueueSourceProcessing(input: {
     sourceId: string;
     workspaceId: string;
+    processingVersion: number;
 }) {
     await inngest.send({
+        id: `source-process:${input.sourceId}:v${input.processingVersion}`,
         name: "source/created",
+        data: input,
+    });
+}
+
+export async function enqueueSourceDeletion(input: {
+    sourceId: string;
+    workspaceId: string;
+}) {
+    await inngest.send({
+        name: "source/delete",
         data: input,
     });
 }

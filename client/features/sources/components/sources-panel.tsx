@@ -2,14 +2,14 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { BookOpenIcon, PlusIcon, SearchIcon } from "lucide-react";
+import { BookOpenIcon, PlusIcon, RotateCcwIcon, SearchIcon, Trash2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { useNotebookUiStore } from "@/features/workspaces/stores/notebook-ui-store";
-import { useSources } from "../hooks/use-sources";
+import { useDeleteSource, useReprocessSource, useSources } from "../hooks/use-sources";
 import { sourceRoutes } from "../lib/routes";
 import { AddSourceDialog } from "./add-source-dialog";
 import { SourceStatusBadge } from "./source-status-badge";
@@ -26,6 +26,8 @@ export function SourcesPanel({ workspaceId }: SourcesPanelProps) {
     const [query, setQuery] = useState("");
     const [addOpen, setAddOpen] = useState(false);
     const { data: sources = [], isLoading, error } = useSources(workspaceId);
+    const deleteSource = useDeleteSource(workspaceId);
+    const reprocessSource = useReprocessSource(workspaceId);
     const selectedSourceIds = useNotebookUiStore(
         (state) =>
             state.byNotebook[workspaceId]?.selectedSourceIds ??
@@ -40,6 +42,9 @@ export function SourcesPanel({ workspaceId }: SourcesPanelProps) {
     );
     const setSelectedSourceIds = useNotebookUiStore(
         (state) => state.setSelectedSourceIds,
+    );
+    const addSelectedSourceId = useNotebookUiStore(
+        (state) => state.addSelectedSourceId,
     );
 
     const normalizedQuery = query.trim().toLocaleLowerCase();
@@ -145,7 +150,7 @@ export function SourcesPanel({ workspaceId }: SourcesPanelProps) {
                             const selectable = source.status === "READY";
                             return (
                                 <li key={source.id} className={cn("paper-tab group relative rounded-r-md", selected && "border-l-primary bg-primary/5")}>
-                                    <div className="flex min-h-16 w-full items-start gap-2 px-2 py-2 pr-9 text-left">
+                                    <div className="flex min-h-16 w-full items-start gap-2 px-2 py-2 pr-28 text-left">
                                         <Checkbox
                                             className="mt-1"
                                             checked={selected}
@@ -156,7 +161,13 @@ export function SourcesPanel({ workspaceId }: SourcesPanelProps) {
                                         <SourceTypeIcon type={source.type} className="mt-1 size-4 shrink-0" />
                                         <span className="min-w-0 flex-1">
                                             <span className="block truncate text-sm font-medium">{source.title}</span>
-                                            <span className="mt-1 block"><SourceStatusBadge status={source.status} /></span>
+                                            <span className="mt-1 block"><SourceStatusBadge status={source.status} stage={source.processingStage} /></span>
+                                            {source.status === "FAILED" && source.metadata?.processingError ? (
+                                                <span className="mt-1 line-clamp-2 block text-xs text-destructive">{source.metadata.processingError}</span>
+                                            ) : null}
+                                            {source.status === "DELETING" && source.metadata?.cleanupError ? (
+                                                <span className="mt-1 line-clamp-2 block text-xs text-destructive">{source.metadata.cleanupError}</span>
+                                            ) : null}
                                         </span>
                                     </div>
                                     <Button
@@ -169,6 +180,64 @@ export function SourcesPanel({ workspaceId }: SourcesPanelProps) {
                                         <BookOpenIcon />
                                         <span className="sr-only">Open {source.title}</span>
                                     </Button>
+                                    {source.status === "FAILED" ? (
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="icon-sm"
+                                            className="absolute top-3 right-9"
+                                            disabled={reprocessSource.isPending}
+                                            onClick={() => reprocessSource.mutate(source.id)}
+                                        >
+                                            <RotateCcwIcon />
+                                            <span className="sr-only">Retry {source.title}</span>
+                                        </Button>
+                                    ) : source.status !== "DELETING" ? (
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="icon-sm"
+                                            className="absolute top-3 right-9"
+                                            disabled={deleteSource.isPending}
+                                            onClick={() => {
+                                                if (window.confirm(`Remove “${source.title}” and its indexed data?`)) {
+                                                    deleteSource.mutate(source.id);
+                                                }
+                                            }}
+                                        >
+                                            <Trash2Icon />
+                                            <span className="sr-only">{source.status === "READY" ? "Remove" : "Cancel and remove"} {source.title}</span>
+                                        </Button>
+                                    ) : (
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="icon-sm"
+                                            className="absolute top-3 right-9"
+                                            disabled={deleteSource.isPending}
+                                            onClick={() => deleteSource.mutate(source.id)}
+                                        >
+                                            <RotateCcwIcon />
+                                            <span className="sr-only">Retry cleanup for {source.title}</span>
+                                        </Button>
+                                    )}
+                                    {source.status === "FAILED" ? (
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="icon-sm"
+                                            className="absolute top-3 right-[4.5rem]"
+                                            disabled={deleteSource.isPending}
+                                            onClick={() => {
+                                                if (window.confirm(`Remove “${source.title}” and its indexed data?`)) {
+                                                    deleteSource.mutate(source.id);
+                                                }
+                                            }}
+                                        >
+                                            <Trash2Icon />
+                                            <span className="sr-only">Remove {source.title}</span>
+                                        </Button>
+                                    ) : null}
                                 </li>
                             );
                         })}
@@ -211,9 +280,7 @@ export function SourcesPanel({ workspaceId }: SourcesPanelProps) {
                 workspaceId={workspaceId}
                 open={addOpen}
                 onOpenChange={setAddOpen}
-                onSuccess={() => {
-                    setAddOpen(false);
-                }}
+                onSuccess={(sourceId) => addSelectedSourceId(workspaceId, sourceId)}
             />
         </section>
     );

@@ -15,12 +15,100 @@ export const sourceStatusSchema = z.enum([
     "PROCESSING",
     "READY",
     "FAILED",
+    "DELETING",
 ]);
 
 export type SourceStatus = z.infer<typeof sourceStatusSchema>;
 
 export const SOURCE_SELECTION_MAX = 50;
+export const SOURCE_TITLE_MAX_LENGTH = 200;
+export const SOURCE_URL_MAX_LENGTH = 2_048;
+export const SOURCE_CONTENT_MAX_LENGTH = 750_000;
+export const SOURCE_EXTRACTED_TEXT_MAX_LENGTH = 2_000_000;
+export const SOURCE_TRANSCRIPT_SEGMENT_MAX = 25_000;
+export const SOURCE_UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
+export const SOURCE_BATCH_MAX_ITEMS = 10;
+export const NOTEBOOK_SOURCE_MAX = 100;
+export const NOTEBOOK_PROCESSING_MAX = 5;
+export const SOURCE_PROCESSING_VERSION = 1;
 export const RETRIEVAL_VERSION = "hybrid-v1";
+
+export const sourceProcessingStageSchema = z.enum([
+    "QUEUED",
+    "UPLOADING",
+    "EXTRACTING",
+    "CHUNKING",
+    "EMBEDDING",
+    "INDEXING",
+    "READY",
+    "FAILED",
+    "CLEANING_UP",
+]);
+
+export const sourceFailureCodeSchema = z.enum([
+    "QUEUE_UNAVAILABLE",
+    "EXTRACTION_FAILED",
+    "CONTENT_TOO_LARGE",
+    "NO_EXTRACTABLE_CONTENT",
+    "CHUNKING_FAILED",
+    "EMBEDDING_FAILED",
+    "INDEXING_FAILED",
+    "CLEANUP_FAILED",
+]);
+
+export type SourceProcessingStage = z.infer<typeof sourceProcessingStageSchema>;
+export type SourceFailureCode = z.infer<typeof sourceFailureCodeSchema>;
+
+const sourceTitleSchema = z
+    .string()
+    .trim()
+    .min(1, "Title is required")
+    .max(SOURCE_TITLE_MAX_LENGTH);
+const sourceContentInputSchema = z
+    .string()
+    .trim()
+    .min(1, "Content is required")
+    .max(SOURCE_CONTENT_MAX_LENGTH, "Content is too large");
+const httpUrlSchema = z
+    .url({ protocol: /^https?$/ })
+    .max(SOURCE_URL_MAX_LENGTH);
+
+export const createSourceInputSchema = z.discriminatedUnion("type", [
+    z.object({
+        type: z.literal("TEXT"),
+        title: sourceTitleSchema,
+        content: sourceContentInputSchema,
+    }),
+    z.object({
+        type: z.literal("MARKDOWN"),
+        title: sourceTitleSchema,
+        content: sourceContentInputSchema,
+    }),
+]);
+
+export const importWebsiteInputSchema = z.object({
+    url: httpUrlSchema,
+    title: sourceTitleSchema.optional(),
+});
+
+export const importYoutubeInputSchema = z.object({
+    url: httpUrlSchema.refine(
+        (url) => /(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)[\w-]{11}/.test(url),
+        "Enter a valid YouTube URL",
+    ),
+    title: sourceTitleSchema.optional(),
+});
+
+export const sourceIdempotencyKeySchema = z
+    .string()
+    .trim()
+    .min(8)
+    .max(128)
+    .regex(/^[A-Za-z0-9._:-]+$/, "Idempotency key contains unsupported characters");
+
+export type CreateSourceInput = z.infer<typeof createSourceInputSchema>;
+export type ImportWebsiteInput = z.infer<typeof importWebsiteInputSchema>;
+export type ImportYoutubeInput = z.infer<typeof importYoutubeInputSchema>;
 
 export const sourceSelectionModeSchema = z.enum(["all-ready", "custom"]);
 export const groundingModeSchema = z.enum([
@@ -125,8 +213,10 @@ export type CitationAvailability = z.infer<typeof citationAvailabilitySchema>;
 
 const sourceMetadataCommonSchema = z.object({
     processingError: z.string().min(1).optional(),
+    failureCode: sourceFailureCodeSchema.optional(),
     chunkCount: z.number().int().nonnegative().optional(),
     indexedAt: z.iso.datetime().optional(),
+    cleanupError: z.string().min(1).optional(),
 });
 
 export const transcriptSegmentSchema = z.object({
@@ -142,6 +232,7 @@ export const pdfSourceMetadataSchema = sourceMetadataCommonSchema.extend({
     publicId: z.string().min(1).optional(),
     resourceType: z.enum(["raw", "image"]).optional(),
     pageCount: z.number().int().positive().optional(),
+    safetyCheck: z.literal("pdf-signature-verified").optional(),
 });
 
 export const websiteSourceMetadataSchema = sourceMetadataCommonSchema.extend({
@@ -163,6 +254,7 @@ export const storedSourceMetadataSchema = sourceMetadataCommonSchema.extend({
     publicId: z.string().min(1).optional(),
     resourceType: z.enum(["raw", "image"]).optional(),
     pageCount: z.number().int().positive().optional(),
+    safetyCheck: z.literal("pdf-signature-verified").optional(),
     importedFrom: z.string().min(1).optional(),
     sourceUrl: z.url({ protocol: /^https?$/ }).optional(),
     videoId: z.string().regex(/^[\w-]{11}$/).optional(),
@@ -176,6 +268,9 @@ const sourceRecordBaseSchema = z.object({
     content: z.string().nullable(),
     url: z.url({ protocol: /^https?$/ }).nullable(),
     status: sourceStatusSchema,
+    processingStage: sourceProcessingStageSchema,
+    processingVersion: z.number().int().positive(),
+    contentChecksum: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
 });
@@ -216,6 +311,7 @@ export const sourceChunkSchema = z.object({
     content: z.string(),
     tokenCount: z.number().int().nonnegative().nullable(),
     metadata: sourceChunkMetadataSchema.nullable(),
+    processingVersion: z.number().int().positive(),
     createdAt: z.iso.datetime(),
 });
 

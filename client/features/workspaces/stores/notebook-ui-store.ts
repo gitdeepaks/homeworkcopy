@@ -45,6 +45,7 @@ type NotebookUiState = {
         mode: SourceSelectionMode,
     ) => void;
     setSelectedSourceIds: (notebookId: string, sourceIds: string[]) => void;
+    addSelectedSourceId: (notebookId: string, sourceId: string) => void;
     openSource: (notebookId: string, sourceId: string) => void;
     openCitation: (
         notebookId: string,
@@ -135,6 +136,16 @@ export const useNotebookUiStore = create<NotebookUiState>()(
                         selectedSourceIds: [...new Set(selectedSourceIds)],
                     }),
                 ),
+            addSelectedSourceId: (notebookId, sourceId) =>
+                set((state) => {
+                    const current = viewStateFor(state.byNotebook, notebookId);
+                    if (current.sourceSelectionMode === "all-ready") {
+                        return state;
+                    }
+                    return updateNotebook(state, notebookId, {
+                        selectedSourceIds: [...new Set([...current.selectedSourceIds, sourceId])],
+                    });
+                }),
             openSource: (notebookId, activeSourceId) =>
                 set((state) =>
                     updateNotebook(state, notebookId, {

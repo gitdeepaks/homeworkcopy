@@ -13,6 +13,7 @@ export const SOURCE_STATUS_LABELS: Record<SourceStatus, string> = {
     PROCESSING: "Processing",
     READY: "Ready",
     FAILED: "Failed",
+    DELETING: "Removing",
 };
 
 export const SOURCE_TYPES: SourceType[] = [
@@ -28,4 +29,5 @@ export const SOURCE_STATUSES: SourceStatus[] = [
     "PROCESSING",
     "READY",
     "FAILED",
+    "DELETING",
 ];

@@ -62,6 +62,7 @@ export function SourceDetail({ workspaceId, sourceId }: SourceDetailProps) {
         source.type === "PDF" ? source.metadata?.fileName ?? null : null;
     const chunkCount = source.metadata?.chunkCount ?? null;
     const processingError = source.metadata?.processingError ?? null;
+    const cleanupError = source.metadata?.cleanupError ?? null;
     const isProcessing =
         source.status === "PENDING" || source.status === "PROCESSING";
 
@@ -84,7 +85,7 @@ export function SourceDetail({ workspaceId, sourceId }: SourceDetailProps) {
                         <h2 className="font-heading text-xl font-semibold">
                             {source.title}
                         </h2>
-                        <SourceStatusBadge status={source.status} />
+                        <SourceStatusBadge status={source.status} stage={source.processingStage} />
                     </div>
                     <p className="text-sm text-muted-foreground">
                         {SOURCE_TYPE_LABELS[source.type]} · Added{" "}
@@ -129,7 +130,11 @@ export function SourceDetail({ workspaceId, sourceId }: SourceDetailProps) {
                 </div>
             ) : null}
 
-            {isProcessing ? (
+            {source.status === "DELETING" ? (
+                <div className="rounded-2xl border border-dashed p-8 text-center text-sm text-muted-foreground">
+                    {cleanupError ?? "Removing source content, vectors, and owned files…"}
+                </div>
+            ) : isProcessing ? (
                 <div className="rounded-2xl border border-dashed p-8 text-center text-sm text-muted-foreground">
                     Processing source — extracting text, chunking, and
                     indexing for search…
