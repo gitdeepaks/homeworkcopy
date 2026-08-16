@@ -1,12 +1,13 @@
 import type {
     JsonReadValue,
     OutputGenerationOptionsRequest,
+    OutputGenerationStage,
     OutputStatus,
     OutputType,
     SourceSelection,
 } from "@homeworkcopy/contracts";
 
-export type { OutputStatus, OutputType };
+export type { OutputGenerationStage, OutputStatus, OutputType };
 
 /** A Studio output as returned by the API. */
 export type StudioOutput = {
@@ -18,6 +19,7 @@ export type StudioOutput = {
     contentVersion: number;
     sourceIds: string[];
     status: OutputStatus;
+    stage: OutputGenerationStage;
     attemptCount: number;
     cancelledAt: string | null;
     metadata: JsonReadValue;

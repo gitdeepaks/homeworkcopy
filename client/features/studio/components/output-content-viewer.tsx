@@ -3,6 +3,7 @@
 import { parseOutputContent, readOutputMetadata } from "@homeworkcopy/contracts";
 import { linkSourceMarkers, mapOutputProse } from "../lib/citations";
 import type { StudioOutput } from "../lib/types";
+import { AudioOverviewViewer } from "./viewers/audio-overview-viewer";
 import { BriefingViewer } from "./viewers/briefing-viewer";
 import { FaqViewer } from "./viewers/faq-viewer";
 import { FlashcardsViewer } from "./viewers/flashcards-viewer";
@@ -76,5 +77,15 @@ export function OutputContentViewer({
             return <TimelineViewer events={content.data.events} />;
         case "BRIEFING":
             return <BriefingViewer briefing={content.data} />;
+        case "AUDIO_OVERVIEW":
+            return (
+                <AudioOverviewViewer
+                    workspaceId={workspaceId}
+                    outputId={output.id}
+                    title={output.title}
+                    content={content.data}
+                    sourceLabels={sourceLabels}
+                />
+            );
     }
 }

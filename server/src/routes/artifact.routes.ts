@@ -5,6 +5,7 @@ import {
     deleteArtifact,
     duplicateArtifact,
     getArtifact,
+    getArtifactAudio,
     listArtifacts,
     regenerateArtifact,
     renameArtifact,
@@ -17,6 +18,7 @@ export const artifactRoutes = Router({ mergeParams: true });
 artifactRoutes.get("/", asyncHandler(listArtifacts));
 artifactRoutes.post("/", generationRateLimit, asyncHandler(createArtifact));
 artifactRoutes.get("/:artifactId", asyncHandler(getArtifact));
+artifactRoutes.get("/:artifactId/audio", asyncHandler(getArtifactAudio));
 artifactRoutes.patch("/:artifactId", asyncHandler(renameArtifact));
 artifactRoutes.post(
     "/:artifactId/regenerate",

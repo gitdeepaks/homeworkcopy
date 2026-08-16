@@ -42,6 +42,7 @@ import { Button } from "@/components/ui/button";
 import {
     DropdownMenu,
     DropdownMenuContent,
+    DropdownMenuGroup,
     DropdownMenuItem,
     DropdownMenuLabel,
     DropdownMenuSeparator,
@@ -500,24 +501,30 @@ export function WorkspaceChat({
                         </span>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent className="w-72">
-                        <DropdownMenuLabel>Conversations</DropdownMenuLabel>
-                        <DropdownMenuItem onClick={() => void handleNewChat()}>
-                            <MessageSquarePlusIcon /> New chat
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        {conversations.length === 0 ? (
-                            <DropdownMenuItem disabled>No saved conversations</DropdownMenuItem>
-                        ) : conversations.map((conversation) => (
+                        <DropdownMenuGroup>
                             <DropdownMenuItem
-                                key={conversation.id}
-                                onClick={() => void handleConversationSwitch(conversation.id)}
+                                onClick={() => void handleNewChat()}
                             >
-                                <span className="truncate">
-                                    {conversation.title ?? "Untitled chat"}
-                                </span>
-                                {conversation.id === conversationId ? <CheckIcon className="ml-auto" /> : null}
+                                <MessageSquarePlusIcon /> New chat
                             </DropdownMenuItem>
-                        ))}
+                        </DropdownMenuGroup>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuGroup>
+                            <DropdownMenuLabel>Conversations</DropdownMenuLabel>
+                            {conversations.length === 0 ? (
+                                <DropdownMenuItem disabled>No saved conversations</DropdownMenuItem>
+                            ) : conversations.map((conversation) => (
+                                <DropdownMenuItem
+                                    key={conversation.id}
+                                    onClick={() => void handleConversationSwitch(conversation.id)}
+                                >
+                                    <span className="truncate">
+                                        {conversation.title ?? "Untitled chat"}
+                                    </span>
+                                    {conversation.id === conversationId ? <CheckIcon className="ml-auto" /> : null}
+                                </DropdownMenuItem>
+                            ))}
+                        </DropdownMenuGroup>
                     </DropdownMenuContent>
                 </DropdownMenu>
 

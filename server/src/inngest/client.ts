@@ -14,6 +14,12 @@ export type ArtifactGenerateEvent = {
     data: { artifactId: string; workspaceId: string; attempt?: number };
 };
 
+/** Retires a stored media object an output no longer owns. */
+export type ArtifactMediaCleanupEvent = {
+    name: "artifact/media-cleanup";
+    data: { workspaceId: string; publicId: string };
+};
+
 export type ConversationSummarizeEvent = {
     name: "conversation/summarize";
     data: { conversationId: string; userId: string };
@@ -28,6 +34,7 @@ export type InngestEvents =
     | SourceCreatedEvent
     | SourceDeleteEvent
     | ArtifactGenerateEvent
+    | ArtifactMediaCleanupEvent
     | ConversationSummarizeEvent;
 
 // Keep this production identifier stable unless an explicit Inngest migration is run.

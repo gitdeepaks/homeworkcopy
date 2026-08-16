@@ -75,6 +75,24 @@ function contentToMarkdown(content: OutputContent): string[] {
             return content.data.events.map(
                 (event) => `- **${event.when}** — ${event.label}: ${event.description}`,
             );
+        case "AUDIO_OVERVIEW":
+            return [
+                `_${content.data.script.segments.length} segments · ${content.data.media ? `${Math.round(content.data.media.durationMs / 1_000)} seconds` : "audio pending"}_`,
+                "## Transcript",
+                ...content.data.script.segments.map((segment) => {
+                    const speaker =
+                        content.data.script.style === "dialogue"
+                            ? `**${segment.speaker === "host" ? "Host" : "Guest"}:** `
+                            : "";
+                    const cited =
+                        segment.sourceLabels.length > 0
+                            ? ` ${segment.sourceLabels
+                                  .map((label) => `[${label}]`)
+                                  .join(" ")}`
+                            : "";
+                    return `${speaker}${segment.text}${cited}`;
+                }),
+            ];
         case "BRIEFING":
             return [
                 `## ${content.data.headline}`,

@@ -119,9 +119,12 @@ export function mapOutputProse(
                     nextSteps: content.data.nextSteps.map(transform),
                 },
             };
+        // Card, graph, and spoken content carry no inline markers: an audio
+        // script cites its sources per segment, not mid-sentence.
         case "FLASHCARDS":
         case "QUIZ":
         case "MINDMAP":
+        case "AUDIO_OVERVIEW":
             return content;
     }
 }

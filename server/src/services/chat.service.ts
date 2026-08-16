@@ -330,6 +330,7 @@ export async function saveMessageAsOutputForWorkspace(
         title: `Saved answer · ${new Date().toLocaleDateString()}`,
         sourceIds,
         status: "READY",
+        stage: "READY",
         attemptCount: 1,
         contentVersion: OUTPUT_CONTENT_VERSION,
         content: toPrismaJson(content.data),

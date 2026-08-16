@@ -14,8 +14,11 @@ import {
     useOutput,
     useRegenerateOutput,
 } from "../hooks/use-outputs";
+import { formatSpokenDuration } from "../lib/audio";
 import {
+    AUDIO_STYLE_LABELS,
     OUTPUT_LENGTH_LABELS,
+    OUTPUT_STAGE_LABELS,
     OUTPUT_TYPE_LABELS,
 } from "../lib/constants";
 import { studioRoutes } from "../lib/routes";
@@ -78,8 +81,13 @@ export function OutputDetail({ workspaceId, outputId }: OutputDetailProps) {
     const generating = isOutputGenerating(output.status);
     const isMindMap = output.type === "MINDMAP";
 
+    const audio = metadata?.audio;
     const details = [
         `${output.sourceIds.length} source${output.sourceIds.length === 1 ? "" : "s"}`,
+        audio?.durationMs === undefined
+            ? null
+            : formatSpokenDuration(audio.durationMs),
+        audio ? AUDIO_STYLE_LABELS[audio.style] : null,
         metadata?.options
             ? OUTPUT_LENGTH_LABELS[metadata.options.length]
             : null,
@@ -128,7 +136,7 @@ export function OutputDetail({ workspaceId, outputId }: OutputDetailProps) {
                 >
                     <span className="flex items-center gap-2">
                         <Spinner />
-                        Generating{" "}
+                        {OUTPUT_STAGE_LABELS[output.stage]} ·{" "}
                         {OUTPUT_TYPE_LABELS[output.type].toLowerCase()} from{" "}
                         {output.sourceIds.length} selected source
                         {output.sourceIds.length === 1 ? "" : "s"}…

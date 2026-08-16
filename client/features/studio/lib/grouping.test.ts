@@ -11,6 +11,7 @@ function output(overrides: Partial<StudioOutput> & { id: string }): StudioOutput
         contentVersion: 1,
         sourceIds: ["source-1"],
         status: "READY",
+        stage: "READY",
         attemptCount: 1,
         cancelledAt: null,
         metadata: null,

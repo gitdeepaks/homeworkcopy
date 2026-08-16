@@ -10,6 +10,7 @@ import {
 import { findSourceById } from "../repositories/source.repository.js";
 import { findChunksBySourceIdAndProcessingVersion } from "../repositories/source-chunk.repository.js";
 import { processArtifactById } from "../services/artifact.service.js";
+import { removeStoredAudio } from "../services/audio-overview.service.js";
 import { summarizeConversationById } from "../services/conversation-memory.service.js";
 import { cleanupSourceById } from "../services/source.service.js";
 
@@ -113,6 +114,25 @@ export const generateArtifact = inngest.createFunction(
   },
 );
 
+export const cleanupArtifactMedia = inngest.createFunction(
+  {
+    id: "cleanup-artifact-media",
+    retries: 5,
+    triggers: [{ event: "artifact/media-cleanup" }],
+  },
+  async ({ event, step }) => {
+    const { publicId } = event.data;
+
+    // Deleting an object that is already gone is a no-op, so replays are safe.
+    await step.run("delete-object", async () => {
+      await removeStoredAudio(publicId);
+      return { publicId };
+    });
+
+    return { publicId, status: "DELETED" };
+  },
+);
+
 export const summarizeConversation = inngest.createFunction(
   {
     id: "summarize-conversation",
@@ -135,5 +155,6 @@ export const functions = [
   processSource,
   deleteSource,
   generateArtifact,
+  cleanupArtifactMedia,
   summarizeConversation,
 ];

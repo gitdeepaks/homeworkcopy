@@ -1,4 +1,5 @@
-import { apiFetch, apiFetchVoid } from "@/shared/lib/api";
+import { outputAudioAccessSchema } from "@homeworkcopy/contracts";
+import { apiFetch, apiFetchVoid, apiFetchWithSchema } from "@/shared/lib/api";
 import type { CreateOutputInput, StudioOutput } from "./types";
 
 function outputsPath(workspaceId: string) {
@@ -11,6 +12,19 @@ export function listOutputs(workspaceId: string) {
 
 export function getOutput(workspaceId: string, outputId: string) {
     return apiFetch<StudioOutput>(`${outputsPath(workspaceId)}/${outputId}`);
+}
+
+/**
+ * Fetches short-lived signed URLs for an Audio Overview's media.
+ *
+ * The response is validated because the URLs are handed straight to an
+ * `<audio>` element and a download control.
+ */
+export function getOutputAudio(workspaceId: string, outputId: string) {
+    return apiFetchWithSchema(
+        `${outputsPath(workspaceId)}/${outputId}/audio`,
+        outputAudioAccessSchema,
+    );
 }
 
 export function createOutput(workspaceId: string, input: CreateOutputInput) {

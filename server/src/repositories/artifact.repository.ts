@@ -10,6 +10,7 @@ export const artifactSelect = {
     contentVersion: true,
     sourceIds: true,
     status: true,
+    stage: true,
     attemptCount: true,
     cancelledAt: true,
     metadata: true,
@@ -21,12 +22,15 @@ export type ArtifactRecord = Prisma.LearningArtifactGetPayload<{
     select: typeof artifactSelect;
 }>;
 
+export type ArtifactStage = ArtifactRecord["stage"];
+
 export type CreateArtifactData = {
     workspaceId: string;
     type: ArtifactRecord["type"];
     title: string;
     sourceIds: string[];
     status?: ArtifactRecord["status"];
+    stage?: ArtifactStage;
     attemptCount?: number;
     contentVersion?: number;
     content?: Prisma.InputJsonValue;
@@ -62,6 +66,7 @@ export function createArtifactRecord(data: CreateArtifactData) {
             title: data.title,
             sourceIds: data.sourceIds,
             status: data.status ?? "PENDING",
+            stage: data.stage ?? "QUEUED",
             attemptCount: data.attemptCount ?? 0,
             contentVersion: data.contentVersion ?? 1,
             content: data.content,
@@ -104,6 +109,7 @@ export function startArtifactAttempt(
         where: { id: artifactId },
         data: {
             status: "PENDING",
+            stage: "QUEUED",
             cancelledAt: null,
             attemptCount: { increment: 1 },
             ...(metadata === undefined ? {} : { metadata }),
@@ -138,11 +144,13 @@ export async function cancelArtifactRecord(artifactId: string) {
  *
  * @param artifactId - Output being generated
  * @param attempt - Attempt number carried by the job event
+ * @param stage - First pipeline stage this output type runs
  * @returns `true` when this worker owns the attempt, `false` when it is stale
  */
 export async function claimArtifactGeneration(
     artifactId: string,
     attempt: number,
+    stage: ArtifactStage,
 ) {
     const result = await prisma.learningArtifact.updateMany({
         where: {
@@ -151,7 +159,60 @@ export async function claimArtifactGeneration(
             cancelledAt: null,
             status: { in: [...CLAIMABLE_STATUSES] },
         },
-        data: { status: "PROCESSING" },
+        data: { status: "PROCESSING", stage },
+    });
+    return result.count === 1;
+}
+
+/**
+ * Whether this worker still owns the attempt.
+ *
+ * Long pipelines check between stages so a cancellation or a newer attempt
+ * stops work instead of paying a provider for a result nobody will read.
+ *
+ * @param artifactId - Output being generated
+ * @param attempt - Attempt number carried by the job event
+ * @returns `true` while this attempt is current and not cancelled
+ */
+export async function isArtifactAttemptCurrent(
+    artifactId: string,
+    attempt: number,
+) {
+    const count = await prisma.learningArtifact.count({
+        where: { id: artifactId, attemptCount: attempt, cancelledAt: null },
+    });
+    return count === 1;
+}
+
+/**
+ * Records intermediate progress for an attempt that is still running.
+ *
+ * Writing the stage and any work completed so far is what lets a reader watch a
+ * long generation move, and what lets a retry skip a stage it already paid for.
+ *
+ * @param artifactId - Output being generated
+ * @param attempt - Attempt number the progress belongs to
+ * @param data - Stage, and optionally the partial content and metadata
+ * @returns `true` when the progress was stored, `false` when it was superseded
+ */
+export async function saveArtifactProgress(
+    artifactId: string,
+    attempt: number,
+    data: {
+        stage: ArtifactStage;
+        content?: Prisma.InputJsonValue;
+        contentVersion?: number;
+        metadata?: Prisma.InputJsonValue;
+    },
+) {
+    const result = await prisma.learningArtifact.updateMany({
+        where: {
+            id: artifactId,
+            attemptCount: attempt,
+            cancelledAt: null,
+            status: "PROCESSING",
+        },
+        data,
     });
     return result.count === 1;
 }
@@ -170,6 +231,7 @@ export async function finalizeArtifactGeneration(
     attempt: number,
     data: {
         status: ArtifactRecord["status"];
+        stage: ArtifactStage;
         content?: Prisma.InputJsonValue;
         contentVersion?: number;
         metadata: Prisma.InputJsonValue;

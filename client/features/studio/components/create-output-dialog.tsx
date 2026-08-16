@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { OUTPUT_FOCUS_MAX_LENGTH, OUTPUT_TITLE_MAX_LENGTH, type OutputLength } from "@homeworkcopy/contracts";
+import {
+    DEFAULT_AUDIO_OVERVIEW_OPTIONS,
+    OUTPUT_FOCUS_MAX_LENGTH,
+    OUTPUT_TITLE_MAX_LENGTH,
+    type AudioOverviewStyle,
+    type AudioVoiceProfile,
+    type OutputLength,
+} from "@homeworkcopy/contracts";
 import {
     Dialog,
     DialogContent,
@@ -24,6 +31,10 @@ import { useSources } from "@/features/sources";
 import { resolveSourceSelection } from "@/features/sources/lib/grounding";
 import { useNotebookUiStore } from "@/features/workspaces/stores/notebook-ui-store";
 import {
+    AUDIO_STYLE_LABELS,
+    AUDIO_STYLES,
+    AUDIO_VOICE_LABELS,
+    AUDIO_VOICES,
     CREATABLE_OUTPUT_GROUPS,
     OUTPUT_GROUP_LABELS,
     OUTPUT_LENGTH_LABELS,
@@ -32,6 +43,7 @@ import {
     OUTPUT_TYPE_DESCRIPTIONS,
     OUTPUT_TYPE_LABELS,
 } from "../lib/constants";
+import { useStudioCapabilities } from "../hooks/use-capabilities";
 import { useCreateOutput } from "../hooks/use-outputs";
 import type { OutputType } from "../lib/types";
 
@@ -53,6 +65,12 @@ export function CreateOutputDialog({
     const [focus, setFocus] = useState("");
     const [length, setLength] = useState<OutputLength>("standard");
     const [locale, setLocale] = useState("en");
+    const [audioStyle, setAudioStyle] = useState<AudioOverviewStyle>(
+        DEFAULT_AUDIO_OVERVIEW_OPTIONS.style,
+    );
+    const [audioVoice, setAudioVoice] = useState<AudioVoiceProfile>(
+        DEFAULT_AUDIO_OVERVIEW_OPTIONS.voice,
+    );
     const [changingSources, setChangingSources] = useState(false);
     const [overrideSourceIds, setOverrideSourceIds] = useState<string[] | null>(
         null,
@@ -99,8 +117,24 @@ export function CreateOutputDialog({
         }
     }, [open]);
 
+    const { data: capabilities } = useStudioCapabilities();
+    const audioAvailable = capabilities?.audioOverview === true;
+    const isAudio = type === "AUDIO_OVERVIEW";
     const canGenerate =
-        !sourcesLoading && !sourcesError && selection.canUseSelection;
+        !sourcesLoading &&
+        !sourcesError &&
+        selection.canUseSelection &&
+        (!isAudio || audioAvailable);
+
+    /** A type the reader may pick right now, given sources and configuration. */
+    function isTypeAvailable(outputType: OutputType): boolean {
+        return (
+            !sourcesLoading &&
+            !sourcesError &&
+            selection.canUseSelection &&
+            (outputType !== "AUDIO_OVERVIEW" || audioAvailable)
+        );
+    }
 
     function toggleSource(sourceId: string) {
         const current = overrideSourceIds ?? selection.effectiveSourceIds;
@@ -126,6 +160,9 @@ export function CreateOutputDialog({
                     length,
                     locale,
                     focus: focus.trim() || undefined,
+                    ...(isAudio
+                        ? { audio: { style: audioStyle, voice: audioVoice } }
+                        : {}),
                 },
                 ...selection.request,
             });
@@ -220,44 +257,58 @@ export function CreateOutputDialog({
                                             {OUTPUT_GROUP_LABELS[group]}
                                         </p>
                                         <div className="grid gap-2 sm:grid-cols-2">
-                                            {types.map((outputType) => (
-                                                <label
-                                                    key={outputType}
-                                                    className={`cursor-pointer rounded-2xl border px-3 py-3 text-left transition-colors has-[:checked]:border-primary has-[:checked]:bg-primary/10 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring ${
-                                                        canGenerate
-                                                            ? "hover:bg-muted/50"
-                                                            : "opacity-60"
-                                                    }`}
-                                                >
-                                                    <input
-                                                        type="radio"
-                                                        name="output-type"
-                                                        className="sr-only"
-                                                        value={outputType}
-                                                        checked={
-                                                            type === outputType
-                                                        }
-                                                        disabled={!canGenerate}
-                                                        onChange={() =>
-                                                            setType(outputType)
-                                                        }
-                                                    />
-                                                    <span className="block text-sm font-medium">
-                                                        {
-                                                            OUTPUT_TYPE_LABELS[
+                                            {types.map((outputType) => {
+                                                const available =
+                                                    isTypeAvailable(outputType);
+                                                const unsupported =
+                                                    outputType ===
+                                                        "AUDIO_OVERVIEW" &&
+                                                    !audioAvailable;
+
+                                                return (
+                                                    <label
+                                                        key={outputType}
+                                                        className={`cursor-pointer rounded-2xl border px-3 py-3 text-left transition-colors has-[:checked]:border-primary has-[:checked]:bg-primary/10 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring ${
+                                                            available
+                                                                ? "hover:bg-muted/50"
+                                                                : "cursor-not-allowed opacity-60"
+                                                        }`}
+                                                    >
+                                                        <input
+                                                            type="radio"
+                                                            name="output-type"
+                                                            className="sr-only"
+                                                            value={outputType}
+                                                            checked={
+                                                                type ===
                                                                 outputType
-                                                            ]
-                                                        }
-                                                    </span>
-                                                    <span className="mt-1 block text-xs text-muted-foreground">
-                                                        {
-                                                            OUTPUT_TYPE_DESCRIPTIONS[
-                                                                outputType
-                                                            ]
-                                                        }
-                                                    </span>
-                                                </label>
-                                            ))}
+                                                            }
+                                                            disabled={
+                                                                !available
+                                                            }
+                                                            onChange={() =>
+                                                                setType(
+                                                                    outputType,
+                                                                )
+                                                            }
+                                                        />
+                                                        <span className="block text-sm font-medium">
+                                                            {
+                                                                OUTPUT_TYPE_LABELS[
+                                                                    outputType
+                                                                ]
+                                                            }
+                                                        </span>
+                                                        <span className="mt-1 block text-xs text-muted-foreground">
+                                                            {unsupported
+                                                                ? "Not available: this deployment has no speech provider or media storage configured."
+                                                                : OUTPUT_TYPE_DESCRIPTIONS[
+                                                                      outputType
+                                                                  ]}
+                                                        </span>
+                                                    </label>
+                                                );
+                                            })}
                                         </div>
                                     </div>
                                 ),
@@ -398,6 +449,68 @@ export function CreateOutputDialog({
                                 </NativeSelect>
                             </div>
                         </div>
+
+                        {isAudio ? (
+                            <div className="grid gap-4 sm:grid-cols-2">
+                                <div className="grid gap-2">
+                                    <Label htmlFor="audio-style">Format</Label>
+                                    <NativeSelect
+                                        className="w-full"
+                                        id="audio-style"
+                                        value={audioStyle}
+                                        disabled={!canGenerate}
+                                        onChange={(event) => {
+                                            const next = AUDIO_STYLES.find(
+                                                (option) =>
+                                                    option ===
+                                                    event.target.value,
+                                            );
+                                            if (next) {
+                                                setAudioStyle(next);
+                                            }
+                                        }}
+                                    >
+                                        {AUDIO_STYLES.map((option) => (
+                                            <NativeSelectOption
+                                                key={option}
+                                                value={option}
+                                            >
+                                                {AUDIO_STYLE_LABELS[option]}
+                                            </NativeSelectOption>
+                                        ))}
+                                    </NativeSelect>
+                                </div>
+
+                                <div className="grid gap-2">
+                                    <Label htmlFor="audio-voice">Voice</Label>
+                                    <NativeSelect
+                                        className="w-full"
+                                        id="audio-voice"
+                                        value={audioVoice}
+                                        disabled={!canGenerate}
+                                        onChange={(event) => {
+                                            const next = AUDIO_VOICES.find(
+                                                (option) =>
+                                                    option ===
+                                                    event.target.value,
+                                            );
+                                            if (next) {
+                                                setAudioVoice(next);
+                                            }
+                                        }}
+                                    >
+                                        {AUDIO_VOICES.map((option) => (
+                                            <NativeSelectOption
+                                                key={option}
+                                                value={option}
+                                            >
+                                                {AUDIO_VOICE_LABELS[option]}
+                                            </NativeSelectOption>
+                                        ))}
+                                    </NativeSelect>
+                                </div>
+                            </div>
+                        ) : null}
 
                         <div className="grid gap-2">
                             <Label htmlFor="output-focus">

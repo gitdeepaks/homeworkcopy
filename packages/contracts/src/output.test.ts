@@ -48,9 +48,31 @@ describe("create output request", () => {
         ).toBeFalse();
         expect(
             createOutputRequestSchema.safeParse({
-                type: "AUDIO_OVERVIEW",
+                type: "PODCAST",
                 selectionMode: "all-ready",
                 sourceIds: [],
+            }).success,
+        ).toBeFalse();
+    });
+
+    test("carries audio-only options through the shared options object", () => {
+        const parsed = createOutputRequestSchema.parse({
+            type: "AUDIO_OVERVIEW",
+            selectionMode: "custom",
+            sourceIds: ["source-1"],
+            options: {
+                length: "short",
+                audio: { style: "dialogue", voice: "bright" },
+            },
+        });
+
+        expect(parsed.options?.audio).toEqual({
+            style: "dialogue",
+            voice: "bright",
+        });
+        expect(
+            outputGenerationOptionsInputSchema.safeParse({
+                audio: { style: "podcast", voice: "warm" },
             }).success,
         ).toBeFalse();
     });

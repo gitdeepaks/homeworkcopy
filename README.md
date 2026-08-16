@@ -41,6 +41,7 @@ Production policy defaults: one active Clerk session per browser profile, Google
 - Client: `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, `API_URL`, `NEXT_PUBLIC_APP_URL`.
 - Server auth: `CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, `CLERK_WEBHOOK_SIGNING_SECRET`, `CLIENT_URL`.
 - Optional features: `MEM0_API_KEY`, `TAVILY_API_KEY`, `FIRECRAWL_API_KEY`.
+- Audio Overview: `TTS_PROVIDER` (default `openai`), `TTS_MODEL`, plus `CLOUDINARY_API_KEY` and `CLOUDINARY_API_SECRET` for signed media storage. `GET /api/capabilities` reports whether both halves are configured, and Studio disables the output type with an explanation when they are not. See `server/docs/phase8_audio_overview.md`.
 - Production Inngest: `INNGEST_EVENT_KEY`, `INNGEST_SIGNING_KEY`; use `INNGEST_DEV=1` only locally.
 
 Secrets, webhook signing keys, and Clerk secret keys are server-only. Keep test and production keys strictly separated.

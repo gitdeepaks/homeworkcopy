@@ -391,6 +391,7 @@ export const outputTypeSchema = z.enum([
     "FAQ",
     "TIMELINE",
     "BRIEFING",
+    "AUDIO_OVERVIEW",
 ]);
 
 export const outputStatusSchema = z.enum([
@@ -399,6 +400,24 @@ export const outputStatusSchema = z.enum([
     "READY",
     "FAILED",
     "CANCELLED",
+]);
+
+/**
+ * Where an output currently is inside its pipeline.
+ *
+ * Text outputs move `QUEUED → GENERATING → READY|FAILED`. Audio Overviews
+ * additionally expose `SCRIPTING → SYNTHESIS → ASSEMBLY`, so a reader watching
+ * a multi-minute job can see it progress and so a retry knows what already
+ * finished.
+ */
+export const outputGenerationStageSchema = z.enum([
+    "QUEUED",
+    "GENERATING",
+    "SCRIPTING",
+    "SYNTHESIS",
+    "ASSEMBLY",
+    "READY",
+    "FAILED",
 ]);
 
 export const outputGroupSchema = z.enum([
@@ -410,6 +429,7 @@ export const outputGroupSchema = z.enum([
 
 export type OutputType = z.infer<typeof outputTypeSchema>;
 export type OutputStatus = z.infer<typeof outputStatusSchema>;
+export type OutputGenerationStage = z.infer<typeof outputGenerationStageSchema>;
 export type OutputGroup = z.infer<typeof outputGroupSchema>;
 
 /** Studio shelf each output type belongs to before saved-output overrides. */
@@ -424,6 +444,7 @@ export const OUTPUT_TYPE_GROUP: Record<OutputType, OutputGroup> = {
     FAQ: "writing",
     TIMELINE: "writing",
     BRIEFING: "writing",
+    AUDIO_OVERVIEW: "featured-media",
 };
 
 export const OUTPUT_TYPES: readonly OutputType[] = outputTypeSchema.options;
@@ -442,11 +463,46 @@ const outputFocusSchema = z
     .min(1)
     .max(OUTPUT_FOCUS_MAX_LENGTH);
 
+/** How an Audio Overview is written and performed. */
+export const audioOverviewStyleSchema = z.enum([
+    "narration",
+    "dialogue",
+    "briefing",
+]);
+
+/**
+ * Provider-neutral voice character. Each TTS adapter maps a profile onto its
+ * own catalogue, so switching vendors never changes this contract.
+ */
+export const audioVoiceProfileSchema = z.enum(["neutral", "warm", "bright"]);
+
+/** Who delivers a script segment. Only `dialogue` uses `guest`. */
+export const audioSpeakerSchema = z.enum(["host", "guest"]);
+
+export type AudioOverviewStyle = z.infer<typeof audioOverviewStyleSchema>;
+export type AudioVoiceProfile = z.infer<typeof audioVoiceProfileSchema>;
+export type AudioSpeaker = z.infer<typeof audioSpeakerSchema>;
+
+/** Audio-only generation options; ignored by every other output type. */
+export const audioOverviewOptionsSchema = z.object({
+    style: audioOverviewStyleSchema,
+    voice: audioVoiceProfileSchema,
+});
+
+export type AudioOverviewOptions = z.infer<typeof audioOverviewOptionsSchema>;
+
+/** Applied when a reader creates an Audio Overview without choosing options. */
+export const DEFAULT_AUDIO_OVERVIEW_OPTIONS: AudioOverviewOptions = {
+    style: "narration",
+    voice: "warm",
+};
+
 /** Client-supplied generation options; defaults are applied on parse. */
 export const outputGenerationOptionsInputSchema = z.object({
     length: outputLengthSchema.default("standard"),
     locale: outputLocaleSchema.default("en"),
     focus: outputFocusSchema.optional(),
+    audio: audioOverviewOptionsSchema.optional(),
 });
 
 /** Persisted, versioned generation options snapshot. */
@@ -455,6 +511,7 @@ export const outputGenerationOptionsSchema = z.object({
     length: outputLengthSchema,
     locale: outputLocaleSchema,
     focus: outputFocusSchema.optional(),
+    audio: audioOverviewOptionsSchema.optional(),
 });
 
 export type OutputGenerationOptionsInput = z.infer<
@@ -505,6 +562,10 @@ export const outputFailureStageSchema = z.enum([
     "CONTEXT_ASSEMBLY",
     "GENERATION",
     "VALIDATION",
+    "SCRIPTING",
+    "SYNTHESIS",
+    "ASSEMBLY",
+    "STORAGE",
 ]);
 
 export const outputFailureCodeSchema = z.enum([
@@ -513,6 +574,11 @@ export const outputFailureCodeSchema = z.enum([
     "GENERATION_FAILED",
     "INVALID_MODEL_OUTPUT",
     "UNSUPPORTED_OUTPUT_TYPE",
+    "AUDIO_UNAVAILABLE",
+    "SCRIPT_NOT_GROUNDED",
+    "SYNTHESIS_FAILED",
+    "AUDIO_ASSEMBLY_FAILED",
+    "AUDIO_STORAGE_FAILED",
 ]);
 
 /**
@@ -533,6 +599,24 @@ export const outputMetricsSchema = z.object({
     repairAttempts: z.number().int().nonnegative().optional(),
 });
 
+/**
+ * Compact Audio Overview facts denormalized onto the output row.
+ *
+ * `content.media` stays authoritative; this exists so a Studio card can show
+ * duration and language without parsing a full script, and so a retry knows
+ * whether the persisted script still matches the requested sources and options.
+ */
+export const outputAudioSummarySchema = z.object({
+    style: audioOverviewStyleSchema,
+    voice: audioVoiceProfileSchema,
+    language: outputLocaleSchema,
+    segmentCount: z.number().int().positive(),
+    durationMs: z.number().int().nonnegative().optional(),
+    scriptFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+});
+
+export type OutputAudioSummary = z.infer<typeof outputAudioSummarySchema>;
+
 export const outputMetadataSchema = z.object({
     version: z.literal(OUTPUT_METADATA_VERSION),
     generatedAt: z.iso.datetime().optional(),
@@ -541,6 +625,7 @@ export const outputMetadataSchema = z.object({
     options: outputGenerationOptionsSchema.optional(),
     sourceSnapshot: outputSourceSnapshotSchema.optional(),
     sourceLabels: z.array(outputSourceLabelSchema).optional(),
+    audio: outputAudioSummarySchema.optional(),
     metrics: outputMetricsSchema.optional(),
     failure: z
         .object({
@@ -752,6 +837,159 @@ export const briefingOutputContentSchema = z.object({
     nextSteps: z.array(z.string().trim().min(1)).max(10),
 });
 
+/* --------------------------- Audio Overview ------------------------------- */
+
+export const AUDIO_OVERVIEW_CONTENT_VERSION = 1;
+export const AUDIO_OVERVIEW_SEGMENT_MIN = 2;
+export const AUDIO_OVERVIEW_SEGMENT_MAX = 40;
+/** Kept below the smallest per-request input limit across TTS vendors. */
+export const AUDIO_SEGMENT_TEXT_MAX_LENGTH = 1_200;
+export const AUDIO_SEGMENT_SOURCE_LABELS_MAX = 6;
+
+const audioSegmentIdSchema = z.string().regex(/^s[1-9]\d*$/);
+
+/**
+ * One spoken beat of an Audio Overview.
+ *
+ * Citations are structural rather than inline: a listener cannot hear `[S1]`,
+ * so the labels are attached to the segment and surfaced next to the transcript.
+ */
+export const audioOverviewSegmentSchema = z.object({
+    id: audioSegmentIdSchema,
+    speaker: audioSpeakerSchema,
+    text: z.string().trim().min(1).max(AUDIO_SEGMENT_TEXT_MAX_LENGTH),
+    sourceLabels: z
+        .array(z.string().regex(/^S[1-9]\d*$/))
+        .max(AUDIO_SEGMENT_SOURCE_LABELS_MAX)
+        .refine(
+            (labels) => new Set(labels).size === labels.length,
+            "Segment source labels must be unique",
+        ),
+});
+
+export const audioOverviewScriptSchema = z.object({
+    style: audioOverviewStyleSchema,
+    language: outputLocaleSchema,
+    segments: z
+        .array(audioOverviewSegmentSchema)
+        .min(AUDIO_OVERVIEW_SEGMENT_MIN)
+        .max(AUDIO_OVERVIEW_SEGMENT_MAX)
+        .refine(
+            (segments) =>
+                new Set(segments.map((segment) => segment.id)).size ===
+                segments.length,
+            "Segment ids must be unique",
+        )
+        .refine(
+            (segments) =>
+                segments.some((segment) => segment.sourceLabels.length > 0),
+            "At least one segment must cite a source",
+        ),
+});
+
+/** Where a segment starts and ends inside the assembled audio file. */
+export const audioSegmentTimingSchema = z
+    .object({
+        segmentId: audioSegmentIdSchema,
+        startMs: z.number().int().nonnegative(),
+        endMs: z.number().int().nonnegative(),
+    })
+    .refine((timing) => timing.endMs >= timing.startMs, {
+        message: "A segment cannot end before it starts",
+    });
+
+export const audioMediaSchema = z.object({
+    provider: z.string().min(1),
+    model: z.string().min(1),
+    voiceProfile: audioVoiceProfileSchema,
+    /** Vendor voice ids actually used, kept for reproducibility. */
+    voices: z.array(z.string().min(1)).min(1),
+    format: z.literal("mp3"),
+    bytes: z.number().int().positive(),
+    durationMs: z.number().int().nonnegative(),
+    storage: z.object({
+        provider: z.literal("cloudinary"),
+        publicId: z.string().min(1),
+        resourceType: z.literal("video"),
+    }),
+    synthesizedAt: z.iso.datetime(),
+});
+
+/**
+ * Audio Overview content.
+ *
+ * `media` and `timings` are absent while the script exists but synthesis has
+ * not finished, which is exactly what a retry-from-stage reads back.
+ */
+export const audioOverviewOutputContentSchema = z.object({
+    version: z.literal(AUDIO_OVERVIEW_CONTENT_VERSION),
+    script: audioOverviewScriptSchema,
+    timings: z.array(audioSegmentTimingSchema).optional(),
+    media: audioMediaSchema.optional(),
+});
+
+/** Audio Overview content that has finished synthesis and can be played. */
+export const playableAudioOverviewContentSchema =
+    audioOverviewOutputContentSchema.extend({
+        timings: z.array(audioSegmentTimingSchema).min(1),
+        media: audioMediaSchema,
+    });
+
+export type AudioOverviewSegment = z.infer<typeof audioOverviewSegmentSchema>;
+export type AudioOverviewScript = z.infer<typeof audioOverviewScriptSchema>;
+export type AudioSegmentTiming = z.infer<typeof audioSegmentTimingSchema>;
+export type AudioMedia = z.infer<typeof audioMediaSchema>;
+export type AudioOverviewOutputContent = z.infer<
+    typeof audioOverviewOutputContentSchema
+>;
+export type PlayableAudioOverviewContent = z.infer<
+    typeof playableAudioOverviewContentSchema
+>;
+
+/**
+ * Reads Audio Overview content that is ready to play.
+ *
+ * @param value - Raw `content` JSON column value
+ * @returns Content with media and timings, or `null` when it is not playable
+ */
+export function parsePlayableAudioOverview(
+    value: JsonReadValue | undefined,
+): PlayableAudioOverviewContent | null {
+    if (value === null || value === undefined) {
+        return null;
+    }
+    const parsed = playableAudioOverviewContentSchema.safeParse(value);
+    return parsed.success ? parsed.data : null;
+}
+
+/** Short-lived, signed access to an Audio Overview's stored media. */
+export const outputAudioAccessSchema = z.object({
+    version: z.literal(1),
+    /** Signed delivery URL an `<audio>` element can stream with range requests. */
+    playbackUrl: z.url({ protocol: /^https$/ }),
+    /** Signed, time-limited URL that saves the file. */
+    downloadUrl: z.url({ protocol: /^https$/ }),
+    expiresAt: z.iso.datetime(),
+    format: z.literal("mp3"),
+    bytes: z.number().int().positive(),
+    durationMs: z.number().int().nonnegative(),
+});
+
+export type OutputAudioAccess = z.infer<typeof outputAudioAccessSchema>;
+
+/**
+ * Optional features this deployment can actually deliver.
+ *
+ * Studio reads this so a tool is never offered as if it worked when the
+ * providers behind it are not configured.
+ */
+export const studioCapabilitiesSchema = z.object({
+    version: z.literal(1),
+    audioOverview: z.boolean(),
+});
+
+export type StudioCapabilities = z.infer<typeof studioCapabilitiesSchema>;
+
 export type SummaryOutputContent = z.infer<typeof summaryOutputContentSchema>;
 export type TakeawaysOutputContent = z.infer<
     typeof takeawaysOutputContentSchema
@@ -780,7 +1018,8 @@ export type OutputContent =
     | { type: "STUDY_GUIDE"; data: StudyGuideOutputContent }
     | { type: "FAQ"; data: FaqOutputContent }
     | { type: "TIMELINE"; data: TimelineOutputContent }
-    | { type: "BRIEFING"; data: BriefingOutputContent };
+    | { type: "BRIEFING"; data: BriefingOutputContent }
+    | { type: "AUDIO_OVERVIEW"; data: AudioOverviewOutputContent };
 
 /**
  * Validates stored or freshly generated output content against the schema for
@@ -837,6 +1076,10 @@ export function parseOutputContent(
         }
         case "BRIEFING": {
             const parsed = briefingOutputContentSchema.safeParse(value);
+            return parsed.success ? { type, data: parsed.data } : null;
+        }
+        case "AUDIO_OVERVIEW": {
+            const parsed = audioOverviewOutputContentSchema.safeParse(value);
             return parsed.success ? { type, data: parsed.data } : null;
         }
     }

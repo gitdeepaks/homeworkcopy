@@ -4,6 +4,7 @@ import {
     createArtifactForWorkspace,
     deleteArtifactForWorkspace,
     duplicateArtifactForWorkspace,
+    getArtifactAudioForWorkspace,
     getArtifactForWorkspace,
     listArtifactsForWorkspace,
     regenerateArtifactForWorkspace,
@@ -33,6 +34,19 @@ export async function getArtifact(req: Request, res: Response) {
         req.session.user.id,
     );
     res.json(artifact);
+}
+
+export async function getArtifactAudio(req: Request, res: Response) {
+    const { workspaceId, artifactId } = artifactIdParamSchema.parse(req.params);
+    const access = await getArtifactAudioForWorkspace(
+        workspaceId,
+        artifactId,
+        req.session.user.id,
+    );
+
+    // Signed URLs are short-lived; a cached copy would outlive its signature.
+    res.set("Cache-Control", "private, no-store");
+    res.json(access);
 }
 
 export async function createArtifact(req: Request, res: Response) {

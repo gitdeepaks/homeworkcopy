@@ -83,7 +83,7 @@ export class OutputGenerationError extends AppError {
 
     /** Whether retrying the same request could plausibly succeed. */
     get isRetriable(): boolean {
-        return this.failureCode === "GENERATION_FAILED";
+        return RETRIABLE_OUTPUT_FAILURES.has(this.failureCode);
     }
 }
 
@@ -93,7 +93,24 @@ const OUTPUT_FAILURE_STATUS: Record<OutputFailureCode, number> = {
     UNSUPPORTED_OUTPUT_TYPE: 400,
     GENERATION_FAILED: 502,
     INVALID_MODEL_OUTPUT: 502,
+    AUDIO_UNAVAILABLE: 503,
+    SCRIPT_NOT_GROUNDED: 502,
+    SYNTHESIS_FAILED: 502,
+    AUDIO_ASSEMBLY_FAILED: 502,
+    AUDIO_STORAGE_FAILED: 502,
 };
+
+/**
+ * Failures caused by a transient provider or network condition. Deterministic
+ * failures stay failed so a retry cannot burn provider budget on the same
+ * outcome.
+ */
+const RETRIABLE_OUTPUT_FAILURES: ReadonlySet<OutputFailureCode> = new Set([
+    "GENERATION_FAILED",
+    "SYNTHESIS_FAILED",
+    "AUDIO_ASSEMBLY_FAILED",
+    "AUDIO_STORAGE_FAILED",
+]);
 
 export class WebSearchUnavailableError extends AppError {
     constructor() {

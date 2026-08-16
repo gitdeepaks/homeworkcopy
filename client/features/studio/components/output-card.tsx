@@ -7,7 +7,12 @@ import { readOutputMetadata } from "@homeworkcopy/contracts";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useRegenerateOutput } from "../hooks/use-outputs";
-import { OUTPUT_LENGTH_LABELS, OUTPUT_TYPE_LABELS } from "../lib/constants";
+import { formatSpokenDuration } from "../lib/audio";
+import {
+    OUTPUT_LENGTH_LABELS,
+    OUTPUT_STAGE_LABELS,
+    OUTPUT_TYPE_LABELS,
+} from "../lib/constants";
 import { studioRoutes } from "../lib/routes";
 import { isOutputGenerating, type StudioOutput } from "../lib/types";
 import { OutputActionsMenu } from "./output-actions-menu";
@@ -28,6 +33,17 @@ export function OutputCard({ output, className }: OutputCardProps) {
     const sourceCount = output.sourceIds.length;
     const generating = isOutputGenerating(output.status);
     const options = metadata?.options;
+    const audio = metadata?.audio;
+
+    const details = [
+        `${sourceCount} source${sourceCount === 1 ? "" : "s"}`,
+        audio?.durationMs === undefined
+            ? null
+            : formatSpokenDuration(audio.durationMs),
+        audio ? audio.language.toUpperCase() : null,
+        options && !audio ? OUTPUT_LENGTH_LABELS[options.length] : null,
+        formatDistanceToNow(new Date(output.createdAt), { addSuffix: true }),
+    ].filter((detail): detail is string => detail !== null);
 
     return (
         <div
@@ -58,12 +74,7 @@ export function OutputCard({ output, className }: OutputCardProps) {
             </Link>
 
             <p className="mt-1 text-xs text-muted-foreground">
-                {sourceCount} source{sourceCount === 1 ? "" : "s"}
-                {options ? ` · ${OUTPUT_LENGTH_LABELS[options.length]}` : ""}
-                {" · "}
-                {formatDistanceToNow(new Date(output.createdAt), {
-                    addSuffix: true,
-                })}
+                {details.join(" · ")}
             </p>
 
             {generating ? (
@@ -71,8 +82,8 @@ export function OutputCard({ output, className }: OutputCardProps) {
                     role="status"
                     className="mt-2 text-xs text-muted-foreground"
                 >
-                    Generating from {sourceCount} selected source
-                    {sourceCount === 1 ? "" : "s"}…
+                    {OUTPUT_STAGE_LABELS[output.stage]} from {sourceCount}{" "}
+                    selected source{sourceCount === 1 ? "" : "s"}…
                 </p>
             ) : null}
 

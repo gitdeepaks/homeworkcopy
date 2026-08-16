@@ -12,6 +12,7 @@ function output(overrides: Partial<StudioOutput>): StudioOutput {
         contentVersion: 1,
         sourceIds: ["source-1"],
         status: "READY",
+        stage: "READY",
         attemptCount: 1,
         cancelledAt: null,
         metadata: {
@@ -92,6 +93,43 @@ describe("outputToMarkdown", () => {
         );
         expect(markdown).toContain("- Cells");
         expect(markdown).toContain("  - Organelles");
+    });
+
+    test("exports an Audio Overview as a readable, cited transcript", () => {
+        const markdown = outputToMarkdown(
+            output({
+                type: "AUDIO_OVERVIEW",
+                title: "Cell biology walkthrough",
+                content: {
+                    version: 1,
+                    script: {
+                        style: "dialogue",
+                        language: "en",
+                        segments: [
+                            {
+                                id: "s1",
+                                speaker: "host",
+                                text: "What makes a cell a cell?",
+                                sourceLabels: [],
+                            },
+                            {
+                                id: "s2",
+                                speaker: "guest",
+                                text: "A membrane, a genome, and a metabolism.",
+                                sourceLabels: ["S1"],
+                            },
+                        ],
+                    },
+                },
+            }),
+        );
+
+        expect(markdown).toContain("## Transcript");
+        expect(markdown).toContain("**Host:** What makes a cell a cell?");
+        expect(markdown).toContain(
+            "**Guest:** A membrane, a genome, and a metabolism. [S1]",
+        );
+        expect(markdown).toContain("audio pending");
     });
 
     test("explains an output that has no content yet", () => {

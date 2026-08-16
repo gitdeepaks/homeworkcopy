@@ -259,6 +259,7 @@ enum ArtifactType {
   FAQ
   TIMELINE
   BRIEFING
+  AUDIO_OVERVIEW
 }
 
 enum ArtifactStatus {
@@ -267,6 +268,18 @@ enum ArtifactStatus {
   READY
   FAILED
   CANCELLED
+}
+
+/// Pipeline position within PENDING/PROCESSING. Audio Overviews use the
+/// scripting, synthesis, and assembly stages; every other type uses GENERATING.
+enum ArtifactStage {
+  QUEUED
+  GENERATING
+  SCRIPTING
+  SYNTHESIS
+  ASSEMBLY
+  READY
+  FAILED
 }
 
 model LearningArtifact {
@@ -278,6 +291,7 @@ model LearningArtifact {
   contentVersion Int         @default(1)
   sourceIds   String[]
   status      ArtifactStatus @default(PENDING)
+  stage       ArtifactStage  @default(QUEUED)
   attemptCount Int           @default(0)
   cancelledAt DateTime?
   metadata    Json?
