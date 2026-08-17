@@ -109,9 +109,19 @@ export async function uploadPdfToCloudinary(
     };
 }
 
+/**
+ * Deletes a stored object.
+ *
+ * @param publicId - Storage id persisted on the record that owned the object
+ * @param resourceType - Cloudinary resource type the object was stored as
+ * @param deliveryType - Delivery type it was stored with. Authenticated assets
+ *   are not reachable under the default `upload` type, so passing the wrong one
+ *   would silently leave a billable object behind.
+ */
 export async function deleteCloudinaryObject(
     publicId: string,
-    resourceType: "raw" | "image",
+    resourceType: "raw" | "image" | "video",
+    deliveryType: "upload" | "authenticated" = "upload",
 ): Promise<void> {
     if (!cloudName || !apiKey || !apiSecret) {
         throw new ValidationError("Cloudinary cleanup is not configured on the server");
@@ -124,6 +134,7 @@ export async function deleteCloudinaryObject(
     });
     await cloudinary.uploader.destroy(publicId, {
         resource_type: resourceType,
+        type: deliveryType,
         invalidate: true,
     });
 }

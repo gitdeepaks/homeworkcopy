@@ -8,6 +8,7 @@ import { readOutputMetadata } from "@homeworkcopy/contracts";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
+import { SaveExcerptButton, type NoteDraftCitation } from "@/features/notes";
 import { ApiError } from "@/shared/lib/api";
 import {
     useCancelOutput,
@@ -21,6 +22,7 @@ import {
     OUTPUT_STAGE_LABELS,
     OUTPUT_TYPE_LABELS,
 } from "../lib/constants";
+import { outputToMarkdown } from "../lib/export";
 import { studioRoutes } from "../lib/routes";
 import { isOutputGenerating } from "../lib/types";
 import { OutputActionsMenu } from "./output-actions-menu";
@@ -82,12 +84,24 @@ export function OutputDetail({ workspaceId, outputId }: OutputDetailProps) {
     const isMindMap = output.type === "MINDMAP";
 
     const audio = metadata?.audio;
+    const video = metadata?.video;
+    const media = audio ?? video;
+    // The label map is what makes an excerpt verifiable: each entry points at a
+    // source the reader can open from the note.
+    const noteCitations: NoteDraftCitation[] = (metadata?.sourceLabels ?? []).map(
+        (label) => ({
+            sourceId: label.sourceId,
+            title: label.title,
+            excerpt: "",
+        }),
+    );
     const details = [
         `${output.sourceIds.length} source${output.sourceIds.length === 1 ? "" : "s"}`,
-        audio?.durationMs === undefined
+        media?.durationMs === undefined
             ? null
-            : formatSpokenDuration(audio.durationMs),
+            : formatSpokenDuration(media.durationMs),
         audio ? AUDIO_STYLE_LABELS[audio.style] : null,
+        video ? `${String(video.sceneCount)} scenes` : null,
         metadata?.options
             ? OUTPUT_LENGTH_LABELS[metadata.options.length]
             : null,
@@ -123,6 +137,15 @@ export function OutputDetail({ workspaceId, outputId }: OutputDetailProps) {
                         {OUTPUT_TYPE_LABELS[output.type]} · {details.join(" · ")}
                     </p>
                 </div>
+                {output.status === "READY" ? (
+                    <SaveExcerptButton
+                        workspaceId={workspaceId}
+                        content={outputToMarkdown(output)}
+                        origin="OUTPUT"
+                        savedFrom={{ kind: "output", outputId: output.id }}
+                        citations={noteCitations}
+                    />
+                ) : null}
                 <OutputActionsMenu
                     output={output}
                     onDeleted={() => router.push(studioRoutes.hub(workspaceId))}

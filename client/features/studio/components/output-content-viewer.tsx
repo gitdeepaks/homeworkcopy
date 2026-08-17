@@ -5,15 +5,18 @@ import { linkSourceMarkers, mapOutputProse } from "../lib/citations";
 import type { StudioOutput } from "../lib/types";
 import { AudioOverviewViewer } from "./viewers/audio-overview-viewer";
 import { BriefingViewer } from "./viewers/briefing-viewer";
+import { DataTableViewer } from "./viewers/data-table-viewer";
 import { FaqViewer } from "./viewers/faq-viewer";
 import { FlashcardsViewer } from "./viewers/flashcards-viewer";
 import { MindMapViewer } from "./viewers/mindmap-viewer";
 import { QuizViewer } from "./viewers/quiz-viewer";
 import { ReportViewer } from "./viewers/report-viewer";
+import { SlidesViewer } from "./viewers/slides-viewer";
 import { StudyGuideViewer } from "./viewers/study-guide-viewer";
 import { SummaryViewer } from "./viewers/summary-viewer";
 import { TakeawaysViewer } from "./viewers/takeaways-viewer";
 import { TimelineViewer } from "./viewers/timeline-viewer";
+import { VideoExplainerViewer } from "./viewers/video-explainer-viewer";
 
 type OutputContentViewerProps = {
     output: StudioOutput;
@@ -85,6 +88,40 @@ export function OutputContentViewer({
                     title={output.title}
                     content={content.data}
                     sourceLabels={sourceLabels}
+                />
+            );
+        case "VIDEO_EXPLAINER":
+            return (
+                <VideoExplainerViewer
+                    workspaceId={workspaceId}
+                    outputId={output.id}
+                    title={output.title}
+                    content={content.data}
+                    sourceLabels={sourceLabels}
+                />
+            );
+        case "SLIDES":
+            return (
+                <SlidesViewer
+                    // Remounting on every stored change discards a draft that a
+                    // regeneration has made stale.
+                    key={output.updatedAt}
+                    workspaceId={workspaceId}
+                    outputId={output.id}
+                    deck={content.data.deck}
+                    sourceLabels={sourceLabels}
+                    canEdit={output.status === "READY"}
+                />
+            );
+        case "DATA_TABLE":
+            return (
+                <DataTableViewer
+                    key={output.updatedAt}
+                    workspaceId={workspaceId}
+                    outputId={output.id}
+                    tables={content.data.tables}
+                    sourceLabels={sourceLabels}
+                    canEdit={output.status === "READY"}
                 />
             );
     }

@@ -104,6 +104,7 @@ model Workspace {
   sources       Source[]
   conversations Conversation[]
   artifacts     LearningArtifact[]
+  notes         Note[]
 
   @@index([userId])
   @@map("workspace")
@@ -115,6 +116,7 @@ enum SourceType {
   YOUTUBE
   TEXT
   MARKDOWN
+  AUDIO
 }
 
 enum SourceStatus {
@@ -260,6 +262,9 @@ enum ArtifactType {
   TIMELINE
   BRIEFING
   AUDIO_OVERVIEW
+  SLIDES
+  DATA_TABLE
+  VIDEO_EXPLAINER
 }
 
 enum ArtifactStatus {
@@ -270,8 +275,9 @@ enum ArtifactStatus {
   CANCELLED
 }
 
-/// Pipeline position within PENDING/PROCESSING. Audio Overviews use the
-/// scripting, synthesis, and assembly stages; every other type uses GENERATING.
+/// Pipeline position within PENDING/PROCESSING. Audio Overviews and video-style
+/// explainers use the scripting, synthesis, and assembly stages; every other
+/// type uses GENERATING.
 enum ArtifactStage {
   QUEUED
   GENERATING
@@ -303,4 +309,37 @@ model LearningArtifact {
   @@index([workspaceId, type])
   @@index([workspaceId, status])
   @@map("learning_artifact")
+}
+
+/// How a note was captured. Decides whether `savedFrom` is populated.
+enum NoteOrigin {
+  MANUAL
+  CHAT
+  OUTPUT
+}
+
+/// A reader's own writing inside a notebook.
+///
+/// Notes cite source locations but are never indexed as grounding material, so
+/// a note can quote a source without becoming one. See
+/// `NOTES_PARTICIPATE_IN_GROUNDING` in @homeworkcopy/contracts.
+model Note {
+  id          String     @id @default(cuid())
+  workspaceId String
+  title       String
+  content     String
+  origin      NoteOrigin @default(MANUAL)
+  /// Sources cited by this note, derived from `citations` on every write.
+  sourceIds   String[]
+  /// Versioned `noteCitationEnvelopeSchema` payload.
+  citations   Json?
+  /// Versioned `noteSavedFromSchema` payload when saved from chat or an output.
+  savedFrom   Json?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  workspace   Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([workspaceId, updatedAt])
+  @@map("note")
 }

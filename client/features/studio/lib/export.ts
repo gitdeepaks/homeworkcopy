@@ -1,6 +1,7 @@
 import {
     parseOutputContent,
     readOutputMetadata,
+    type DataTable,
     type OutputContent,
 } from "@homeworkcopy/contracts";
 import { OUTPUT_TYPE_LABELS } from "./constants";
@@ -9,6 +10,37 @@ import type { StudioOutput } from "./types";
 
 function bulletList(items: readonly string[]): string[] {
     return items.map((item) => `- ${item}`);
+}
+
+/** Renders structural citation labels as a trailing ` [S1] [S2]`. */
+function citationSuffix(labels: readonly string[]): string {
+    return labels.length === 0
+        ? ""
+        : ` ${labels.map((label) => `[${label}]`).join(" ")}`;
+}
+
+/** Escapes a cell so a pipe inside a value cannot break the table. */
+function tableCell(value: string): string {
+    return value.replace(/\|/g, "\\|").replace(/\n+/g, " ").trim() || "—";
+}
+
+/**
+ * Renders an extracted table as a GitHub-flavoured Markdown table, with each
+ * row's citation labels kept as a final column.
+ */
+function markdownTable(table: DataTable): string {
+    const header = [...table.columns.map((column) => column.label), "Sources"];
+    const divider = header.map(() => "---");
+    const rows = table.rows.map((row) => [
+        ...row.cells.map(tableCell),
+        row.sourceLabels.length === 0
+            ? "—"
+            : row.sourceLabels.map((label) => `[${label}]`).join(" "),
+    ]);
+
+    return [header, divider, ...rows]
+        .map((cells) => `| ${cells.join(" | ")} |`)
+        .join("\n");
 }
 
 function contentToMarkdown(content: OutputContent): string[] {
@@ -93,6 +125,38 @@ function contentToMarkdown(content: OutputContent): string[] {
                     return `${speaker}${segment.text}${cited}`;
                 }),
             ];
+        case "VIDEO_EXPLAINER":
+            return [
+                `_${content.data.storyboard.scenes.length} scenes · ${content.data.media ? `${Math.round(content.data.media.durationMs / 1_000)} seconds` : "narration pending"}_`,
+                "## Storyboard",
+                ...content.data.storyboard.scenes.flatMap((scene, index) => [
+                    `### Scene ${index + 1}: ${scene.title}`,
+                    ...bulletList(scene.bullets),
+                    `**Narration:** ${scene.narration}${citationSuffix(scene.sourceLabels)}`,
+                ]),
+            ];
+        case "SLIDES":
+            return [
+                ...(content.data.deck.subtitle
+                    ? [`_${content.data.deck.subtitle}_`]
+                    : []),
+                ...content.data.deck.slides.flatMap((slide, index) => [
+                    `## Slide ${index + 1}: ${slide.title}`,
+                    ...bulletList(slide.bullets),
+                    ...(slide.speakerNotes
+                        ? [`**Notes:** ${slide.speakerNotes}`]
+                        : []),
+                    ...(slide.sourceLabels.length > 0
+                        ? [`_Sources:${citationSuffix(slide.sourceLabels)}_`]
+                        : []),
+                ]),
+            ];
+        case "DATA_TABLE":
+            return content.data.tables.flatMap((table) => [
+                `## ${table.title}`,
+                ...(table.caption ? [`_${table.caption}_`] : []),
+                markdownTable(table),
+            ]);
         case "BRIEFING":
             return [
                 `## ${content.data.headline}`,

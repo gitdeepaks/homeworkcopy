@@ -1,11 +1,18 @@
 import {
     AUDIO_OVERVIEW_CONTENT_VERSION,
+    DATA_TABLE_CONTENT_VERSION,
+    isEditableOutputType,
     OUTPUT_CONTENT_VERSION,
     OUTPUT_METADATA_VERSION,
     outputGenerationOptionsInputSchema,
     parsePlayableAudioOverview,
+    parsePlayableVideoExplainer,
     readOutputMetadata,
+    SLIDES_CONTENT_VERSION,
+    VIDEO_EXPLAINER_CONTENT_VERSION,
+    type AudioMedia,
     type AudioOverviewOutputContent,
+    type EditOutputContentRequest,
     type OutputAudioAccess,
     type OutputFailureCode,
     type OutputGenerationOptions,
@@ -13,6 +20,7 @@ import {
     type OutputSourceSnapshot,
     type OutputType,
     type SourceSelectionMode,
+    type VideoExplainerOutputContent,
 } from "@homeworkcopy/contracts";
 import {
     enqueueArtifactGeneration,
@@ -39,6 +47,7 @@ import {
     ConflictError,
     NotFoundError,
     OutputGenerationError,
+    OutputNotEditableError,
 } from "../types/app-error.js";
 import {
     assertAudioOverviewAvailable,
@@ -53,6 +62,16 @@ import {
     storedAudioPublicId,
     synthesizeScript,
 } from "./audio-overview.service.js";
+import {
+    assertVideoExplainerAvailable,
+    buildVideoSummary,
+    generateVideoStoryboard,
+    reusableStoryboard,
+    storedVideoPublicId,
+    storeVideoExplainer,
+    storyboardFingerprint,
+    synthesizeStoryboard,
+} from "./video-explainer.service.js";
 import {
     describeOutputFailure,
     isRetriableOutputFailure,
@@ -84,7 +103,19 @@ const DEFAULT_OUTPUT_TITLES: Record<OutputType, string> = {
     TIMELINE: "Timeline",
     BRIEFING: "Briefing Document",
     AUDIO_OVERVIEW: "Audio Overview",
+    VIDEO_EXPLAINER: "Video Explainer",
+    SLIDES: "Slide Deck",
+    DATA_TABLE: "Data Tables",
 };
+
+/**
+ * Output types whose pipeline synthesizes narration, so they share the
+ * scripting/synthesis/assembly stages, the voice option, and media cleanup.
+ */
+const NARRATED_OUTPUT_TYPES: ReadonlySet<OutputType> = new Set([
+    "AUDIO_OVERVIEW",
+    "VIDEO_EXPLAINER",
+]);
 
 const DEFAULT_GENERATION_OPTIONS: OutputGenerationOptions = {
     version: 1,
@@ -128,11 +159,29 @@ function resolveGenerationOptions(
         ...(parsed.focus ? { focus: parsed.focus } : {}),
     };
 
-    // Audio-only options are dropped for every other type so a snapshot never
-    // records settings that had no effect on the result.
-    return type === "AUDIO_OVERVIEW"
+    // Voice/style options are dropped for types that never speak, so a snapshot
+    // never records settings that had no effect on the result.
+    return NARRATED_OUTPUT_TYPES.has(type)
         ? { ...base, audio: audioOptionsOf({ ...base, audio: parsed.audio }) }
         : base;
+}
+
+/**
+ * Guards creation of an output whose providers may not be configured.
+ *
+ * Checked before the row exists so the reader is told immediately rather than
+ * watching a job fail minutes later.
+ *
+ * @param type - Output type being created
+ * @throws {OutputGenerationError} When the deployment cannot produce this type
+ */
+function assertOutputTypeAvailable(type: OutputType): void {
+    if (type === "AUDIO_OVERVIEW") {
+        assertAudioOverviewAvailable();
+    }
+    if (type === "VIDEO_EXPLAINER") {
+        assertVideoExplainerAvailable();
+    }
 }
 
 /** Reads persisted metadata, falling back to an empty versioned envelope. */
@@ -206,9 +255,7 @@ export async function createArtifactForWorkspace(
     userId: string,
     input: CreateArtifactInput,
 ) {
-    if (input.type === "AUDIO_OVERVIEW") {
-        assertAudioOverviewAvailable();
-    }
+    assertOutputTypeAvailable(input.type);
 
     const sources = await resolveReadySourcesForWorkspace(
         workspaceId,
@@ -263,6 +310,79 @@ export async function renameArtifactForWorkspace(
 }
 
 /**
+ * Replaces an editable output's generated content with the reader's own edit.
+ *
+ * The payload is validated against the same contract the generator produces, so
+ * an edited output renders and exports exactly like a generated one. The source
+ * snapshot, labels, and generation options are left untouched: an edit changes
+ * the wording, never the record of what evidence the output was built from.
+ *
+ * @param workspaceId - Notebook the output belongs to
+ * @param artifactId - Output to edit
+ * @param userId - Authenticated user's id
+ * @param input - Replacement content, discriminated by output type
+ * @returns The updated output record
+ * @throws {OutputNotEditableError} When the type or status forbids editing
+ */
+export async function updateArtifactContentForWorkspace(
+    workspaceId: string,
+    artifactId: string,
+    userId: string,
+    input: EditOutputContentRequest,
+) {
+    const artifact = await getArtifactForWorkspace(
+        workspaceId,
+        artifactId,
+        userId,
+    );
+
+    if (!isEditableOutputType(artifact.type)) {
+        throw new OutputNotEditableError(
+            "This output type cannot be edited by hand.",
+        );
+    }
+
+    if (artifact.type !== input.type) {
+        throw new OutputNotEditableError(
+            "The edit does not match this output's type.",
+        );
+    }
+
+    if (artifact.status !== "READY") {
+        throw new OutputNotEditableError(
+            "Wait for this output to finish generating before editing it.",
+        );
+    }
+
+    const metadata = metadataOf(artifact);
+    const { content, contentVersion } =
+        input.type === "SLIDES"
+            ? {
+                  content: {
+                      version: SLIDES_CONTENT_VERSION,
+                      deck: input.deck,
+                  },
+                  contentVersion: SLIDES_CONTENT_VERSION,
+              }
+            : {
+                  content: {
+                      version: DATA_TABLE_CONTENT_VERSION,
+                      tables: input.tables,
+                  },
+                  contentVersion: DATA_TABLE_CONTENT_VERSION,
+              };
+
+    return updateArtifactRecord(artifactId, {
+        content: toPrismaJson(content),
+        contentVersion,
+        metadata: toPrismaJson({
+            ...metadata,
+            editedAt: new Date().toISOString(),
+        } satisfies OutputMetadata),
+    });
+}
+
+/**
  * Requeues generation for an existing output using its original sources and
  * options. Any job still running for the previous attempt is invalidated.
  *
@@ -287,9 +407,7 @@ export async function regenerateArtifactForWorkspace(
         throw new ConflictError("This output is already being generated.");
     }
 
-    if (artifact.type === "AUDIO_OVERVIEW") {
-        assertAudioOverviewAvailable();
-    }
+    assertOutputTypeAvailable(artifact.type);
 
     const metadata = metadataOf(artifact);
     const requeued = await startArtifactAttempt(
@@ -328,9 +446,7 @@ export async function duplicateArtifactForWorkspace(
         artifactId,
         userId,
     );
-    if (artifact.type === "AUDIO_OVERVIEW") {
-        assertAudioOverviewAvailable();
-    }
+    assertOutputTypeAvailable(artifact.type);
 
     const source = metadataOf(artifact);
     const metadata: OutputMetadata = {
@@ -408,7 +524,7 @@ export async function deleteArtifactForWorkspace(
         artifactId,
         userId,
     );
-    const publicId = storedAudioPublicId(artifact.content);
+    const publicId = storedMediaPublicId(artifact);
 
     if (publicId) {
         // Queued before the row is removed so a failed enqueue leaves the
@@ -421,13 +537,50 @@ export async function deleteArtifactForWorkspace(
 }
 
 /**
- * Mints short-lived signed URLs for an Audio Overview's stored media.
+ * Reads the storage id of any media attached to an output.
+ *
+ * @param artifact - Output row, whose type selects the content contract
+ * @returns The stored object id, or `null` when the output owns no media
+ */
+function storedMediaPublicId(artifact: ArtifactRecord): string | null {
+    switch (artifact.type) {
+        case "AUDIO_OVERVIEW":
+            return storedAudioPublicId(artifact.content);
+        case "VIDEO_EXPLAINER":
+            return storedVideoPublicId(artifact.content);
+        default:
+            return null;
+    }
+}
+
+/**
+ * Reads the playable media attached to a narrated output.
+ *
+ * @param artifact - Output row, whose type selects the content contract
+ * @returns Media metadata, or `null` when nothing is playable yet
+ */
+function playableMediaOf(artifact: ArtifactRecord): AudioMedia | null {
+    switch (artifact.type) {
+        case "AUDIO_OVERVIEW":
+            return parsePlayableAudioOverview(artifact.content)?.media ?? null;
+        case "VIDEO_EXPLAINER":
+            return parsePlayableVideoExplainer(artifact.content)?.media ?? null;
+        default:
+            return null;
+    }
+}
+
+/**
+ * Mints short-lived signed URLs for a narrated output's stored media.
+ *
+ * Serves Audio Overviews and video explainers, which store the same kind of
+ * object; every other type has no media and is rejected.
  *
  * @param workspaceId - Notebook the output belongs to
- * @param artifactId - Audio Overview to play
+ * @param artifactId - Narrated output to play
  * @param userId - Authenticated user's id
  * @returns Signed playback and download URLs with their expiry
- * @throws {NotFoundError} When the output is not a playable Audio Overview
+ * @throws {NotFoundError} When the output has no playable media
  */
 export async function getArtifactAudioForWorkspace(
     workspaceId: string,
@@ -440,25 +593,25 @@ export async function getArtifactAudioForWorkspace(
         userId,
     );
 
-    if (artifact.type !== "AUDIO_OVERVIEW") {
+    if (!NARRATED_OUTPUT_TYPES.has(artifact.type)) {
         throw new NotFoundError("This output has no audio");
     }
 
-    const content = parsePlayableAudioOverview(artifact.content);
-    if (!content) {
-        throw new NotFoundError("This Audio Overview has no audio yet");
+    const media = playableMediaOf(artifact);
+    if (!media) {
+        throw new NotFoundError("This output has no audio yet");
     }
 
-    const urls = signAudioUrls(content.media.storage.publicId);
+    const urls = signAudioUrls(media.storage.publicId);
 
     return {
         version: 1,
         playbackUrl: urls.playbackUrl,
         downloadUrl: urls.downloadUrl,
         expiresAt: urls.expiresAt.toISOString(),
-        format: content.media.format,
-        bytes: content.media.bytes,
-        durationMs: content.media.durationMs,
+        format: media.format,
+        bytes: media.bytes,
+        durationMs: media.durationMs,
     };
 }
 
@@ -613,6 +766,158 @@ async function runAudioOverviewPipeline(
 }
 
 /**
+ * Runs the video explainer pipeline for one attempt.
+ *
+ * ```
+ * SCRIPTING (storyboard, reused when the fingerprint still matches)
+ *   → SYNTHESIS (narration) → ASSEMBLY → durable storage → READY
+ * ```
+ *
+ * Captions and the poster are derived from this content rather than stored, so
+ * there is exactly one media object per output to key, replace, and retire.
+ *
+ * @param artifact - Output being generated, as claimed by this attempt
+ * @param attempt - Attempt number carried by the job event
+ * @param options - Persisted generation options
+ * @param metadata - Metadata to extend and persist
+ * @param sources - Resolved READY sources, used to fingerprint the storyboard
+ * @param context - Labelled source material for this attempt
+ * @param startedAt - Epoch millis the attempt began, for metrics
+ * @returns What the worker did
+ * @throws {OutputGenerationError} When a stage fails
+ */
+async function runVideoExplainerPipeline(
+    artifact: ArtifactRecord,
+    attempt: number,
+    options: OutputGenerationOptions,
+    metadata: OutputMetadata,
+    sources: SourceRecord[],
+    context: SourceContext,
+    startedAt: number,
+): Promise<ProcessArtifactResult> {
+    assertVideoExplainerAvailable();
+
+    const provider = getTextToSpeechProvider();
+    if (!provider) {
+        throw new OutputGenerationError(
+            "SYNTHESIS",
+            "VIDEO_UNAVAILABLE",
+            "No speech provider is configured on this deployment.",
+        );
+    }
+
+    const fingerprint = storyboardFingerprint(
+        sources.map((source) => ({
+            sourceId: source.id,
+            processingVersion: source.processingVersion,
+        })),
+        options,
+    );
+
+    const reused = reusableStoryboard(
+        artifact.content,
+        metadata.video?.storyboardFingerprint,
+        fingerprint,
+    );
+    let repairAttempts = 0;
+    let storyboard = reused;
+
+    if (!storyboard) {
+        const generated = await generateVideoStoryboard(
+            context.text,
+            options,
+            context.sourceLabels,
+        );
+        storyboard = generated.storyboard;
+        repairAttempts = generated.repairAttempts;
+
+        const scripted: VideoExplainerOutputContent = {
+            version: VIDEO_EXPLAINER_CONTENT_VERSION,
+            storyboard,
+        };
+        const stored = await saveArtifactProgress(artifact.id, attempt, {
+            stage: "SYNTHESIS",
+            content: toPrismaJson(scripted),
+            contentVersion: VIDEO_EXPLAINER_CONTENT_VERSION,
+            metadata: toPrismaJson({
+                ...metadata,
+                sourceLabels: context.sourceLabels,
+                video: buildVideoSummary(scripted, options, fingerprint),
+            } satisfies OutputMetadata),
+        });
+
+        if (!stored) {
+            return { status: "SKIPPED", reason: "cancelled" };
+        }
+    } else {
+        await saveArtifactProgress(artifact.id, attempt, {
+            stage: "SYNTHESIS",
+        });
+    }
+
+    const synthesis = await synthesizeStoryboard(
+        storyboard,
+        options,
+        provider,
+        () => isArtifactAttemptCurrent(artifact.id, attempt),
+    );
+
+    if (!synthesis) {
+        return { status: "SKIPPED", reason: "cancelled" };
+    }
+
+    if (
+        !(await saveArtifactProgress(artifact.id, attempt, {
+            stage: "ASSEMBLY",
+        }))
+    ) {
+        return { status: "SKIPPED", reason: "cancelled" };
+    }
+
+    const content = await storeVideoExplainer(
+        artifact.id,
+        storyboard,
+        synthesis,
+        options,
+    );
+
+    const finalized = await finalizeArtifactGeneration(artifact.id, attempt, {
+        status: "READY",
+        stage: "READY",
+        content: toPrismaJson(content),
+        contentVersion: VIDEO_EXPLAINER_CONTENT_VERSION,
+        metadata: toPrismaJson({
+            ...metadata,
+            provider: OUTPUT_PROVIDER,
+            model: CHAT_MODEL,
+            options,
+            sourceLabels: context.sourceLabels,
+            video: buildVideoSummary(content, options, fingerprint),
+            generatedAt: new Date().toISOString(),
+            failure: undefined,
+            metrics: {
+                contextChars: context.contextChars,
+                durationMs: Date.now() - startedAt,
+                attempts: attempt,
+                repairAttempts,
+            },
+        } satisfies OutputMetadata),
+    });
+
+    if (!finalized) {
+        // The reader cancelled while the file was uploading. Retire the object
+        // rather than leaving it billable and unreachable.
+        await enqueueArtifactMediaCleanup({
+            workspaceId: artifact.workspaceId,
+            publicId: content.media.storage.publicId,
+        });
+        return { status: "SKIPPED", reason: "cancelled" };
+    }
+
+    return { status: "READY" };
+}
+
+/**
  * Runs the full output generation pipeline for one attempt (Inngest worker).
  *
  * ```
@@ -641,13 +946,13 @@ export async function processArtifactById(
         return { status: "SKIPPED", reason: "cancelled" };
     }
 
-    const isAudio = artifact.type === "AUDIO_OVERVIEW";
+    const isNarrated = NARRATED_OUTPUT_TYPES.has(artifact.type);
 
     if (
         !(await claimArtifactGeneration(
             artifactId,
             attempt,
-            isAudio ? "SCRIPTING" : "GENERATING",
+            isNarrated ? "SCRIPTING" : "GENERATING",
         ))
     ) {
         return { status: "SKIPPED", reason: "stale-attempt" };
@@ -666,8 +971,20 @@ export async function processArtifactById(
         const context = gatherSourceContext(sources);
         contextChars = context.contextChars;
 
-        if (isAudio) {
+        if (artifact.type === "AUDIO_OVERVIEW") {
             return await runAudioOverviewPipeline(
+                artifact,
+                attempt,
+                options,
+                metadata,
+                sources,
+                context,
+                startedAt,
+            );
+        }
+
+        if (artifact.type === "VIDEO_EXPLAINER") {
+            return await runVideoExplainerPipeline(
                 artifact,
                 attempt,
                 options,

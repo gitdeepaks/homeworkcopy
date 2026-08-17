@@ -11,9 +11,13 @@ import {
     listSources,
     reprocessSource,
     reprocessSources,
+    uploadAudio,
     uploadPdf,
 } from "../controllers/source.controller.js";
-import { uploadSinglePdf } from "../middleware/upload.middleware.js";
+import {
+    uploadSingleAudio,
+    uploadSinglePdf,
+} from "../middleware/upload.middleware.js";
 import { asyncHandler } from "../utils/async-handler.js";
 import { sourceImportRateLimit } from "../middleware/rate-limit.middleware.js";
 
@@ -26,6 +30,12 @@ sourceRoutes.post(
     sourceImportRateLimit,
     uploadSinglePdf,
     asyncHandler(uploadPdf),
+);
+sourceRoutes.post(
+    "/upload/audio",
+    sourceImportRateLimit,
+    uploadSingleAudio,
+    asyncHandler(uploadAudio),
 );
 sourceRoutes.post("/import/website", sourceImportRateLimit, asyncHandler(importWebsite));
 sourceRoutes.post("/import/youtube", sourceImportRateLimit, asyncHandler(importYoutube));

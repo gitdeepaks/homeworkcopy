@@ -100,8 +100,8 @@ export function importYoutubeSource(
     );
 }
 
-export async function uploadPdfSource(
-    workspaceId: string,
+async function uploadSourceFile(
+    path: string,
     file: File,
     title?: string,
     idempotencyKey?: string,
@@ -113,15 +113,12 @@ export async function uploadPdfSource(
         formData.append("title", title.trim());
     }
 
-    const response = await authenticatedFetch(
-        `/api/workspaces/${workspaceId}/sources/upload`,
-        {
-            method: "POST",
-            credentials: "include",
-            body: formData,
-            headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
-        },
-    );
+    const response = await authenticatedFetch(path, {
+        method: "POST",
+        credentials: "include",
+        body: formData,
+        headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
+    });
 
     const data = await response.json().catch(() => null);
 
@@ -136,6 +133,38 @@ export async function uploadPdfSource(
     }
 
     return sourceSchema.parse(data);
+}
+
+export function uploadPdfSource(
+    workspaceId: string,
+    file: File,
+    title?: string,
+    idempotencyKey?: string,
+) {
+    return uploadSourceFile(
+        `/api/workspaces/${workspaceId}/sources/upload`,
+        file,
+        title,
+        idempotencyKey,
+    );
+}
+
+/**
+ * Uploads a recording. Transcription runs in the background, so the returned
+ * source is `PENDING` until its timestamped transcript is indexed.
+ */
+export function uploadAudioSource(
+    workspaceId: string,
+    file: File,
+    title?: string,
+    idempotencyKey?: string,
+) {
+    return uploadSourceFile(
+        `/api/workspaces/${workspaceId}/sources/upload/audio`,
+        file,
+        title,
+        idempotencyKey,
+    );
 }
 
 export function deleteSource(workspaceId: string, sourceId: string) {

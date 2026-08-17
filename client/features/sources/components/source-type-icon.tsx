@@ -1,4 +1,5 @@
 import {
+    AudioLinesIcon,
     FileTextIcon,
     GlobeIcon,
     NotebookPenIcon,
@@ -14,7 +15,8 @@ const iconMap = {
     YOUTUBE: VideoIcon,
     TEXT: TypeIcon,
     MARKDOWN: NotebookPenIcon,
-} as const;
+    AUDIO: AudioLinesIcon,
+} as const satisfies Record<SourceType, typeof FileTextIcon>;
 
 type SourceTypeIconProps = {
     type: SourceType;

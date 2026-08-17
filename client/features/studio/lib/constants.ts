@@ -21,6 +21,9 @@ export const OUTPUT_TYPE_LABELS: Record<OutputType, string> = {
     TIMELINE: "Timeline",
     BRIEFING: "Briefing Document",
     AUDIO_OVERVIEW: "Audio Overview",
+    VIDEO_EXPLAINER: "Video Explainer",
+    SLIDES: "Slide Deck",
+    DATA_TABLE: "Data Tables",
 };
 
 export const OUTPUT_TYPE_DESCRIPTIONS: Record<OutputType, string> = {
@@ -35,6 +38,10 @@ export const OUTPUT_TYPE_DESCRIPTIONS: Record<OutputType, string> = {
     TIMELINE: "Events and milestones in the order they happen",
     BRIEFING: "Executive summary, decisions, risks, and next steps",
     AUDIO_OVERVIEW: "A narrated walkthrough with a cited transcript",
+    VIDEO_EXPLAINER:
+        "A narrated slide storyboard with captions and a transcript",
+    SLIDES: "An editable presentation outline with supporting evidence",
+    DATA_TABLE: "Comparable facts extracted into tables, row by row",
 };
 
 export const OUTPUT_GROUP_LABELS: Record<OutputGroup, string> = {
@@ -59,7 +66,7 @@ export const CREATABLE_OUTPUT_GROUPS: readonly {
 }[] = [
     {
         group: "featured-media",
-        types: ["AUDIO_OVERVIEW"],
+        types: ["AUDIO_OVERVIEW", "VIDEO_EXPLAINER"],
     },
     {
         group: "study",
@@ -67,7 +74,16 @@ export const CREATABLE_OUTPUT_GROUPS: readonly {
     },
     {
         group: "writing",
-        types: ["SUMMARY", "TAKEAWAYS", "REPORT", "FAQ", "TIMELINE", "BRIEFING"],
+        types: [
+            "SUMMARY",
+            "TAKEAWAYS",
+            "REPORT",
+            "FAQ",
+            "TIMELINE",
+            "BRIEFING",
+            "SLIDES",
+            "DATA_TABLE",
+        ],
     },
 ];
 
@@ -87,7 +103,7 @@ export const OUTPUT_STAGE_LABELS: Record<OutputGenerationStage, string> = {
     QUEUED: "Queued",
     GENERATING: "Generating",
     SCRIPTING: "Writing the script",
-    SYNTHESIS: "Recording the audio",
+    SYNTHESIS: "Recording the narration",
     ASSEMBLY: "Assembling the audio",
     READY: "Ready",
     FAILED: "Failed",

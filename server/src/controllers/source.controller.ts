@@ -11,6 +11,7 @@ import {
     listSourcesForWorkspace,
     reprocessSourceForWorkspace,
     reprocessSourcesForWorkspace,
+    uploadAudioSource,
     uploadPdfSource,
 } from "../services/source.service.js";
 import { ValidationError } from "../types/app-error.js";
@@ -25,7 +26,7 @@ import {
     reprocessSourcesSchema,
     sourceIdParamSchema,
     workspaceIdParamSchema,
-    uploadPdfFieldsSchema,
+    uploadFileFieldsSchema,
 } from "../validators/source.validator.js";
 
 function getIdempotencyKey(req: Request): string | undefined {
@@ -82,9 +83,29 @@ export async function uploadPdf(req: Request, res: Response) {
         throw new ValidationError("PDF file is required");
     }
 
-    const { title } = uploadPdfFieldsSchema.parse(req.body);
+    const { title } = uploadFileFieldsSchema.parse(req.body);
 
     const source = await uploadPdfSource(
+        workspaceId,
+        req.session.user.id,
+        req.file,
+        title,
+        getIdempotencyKey(req),
+    );
+
+    res.status(201).json(source);
+}
+
+export async function uploadAudio(req: Request, res: Response) {
+    const { workspaceId } = workspaceIdParamSchema.parse(req.params);
+
+    if (!req.file) {
+        throw new ValidationError("Audio file is required");
+    }
+
+    const { title } = uploadFileFieldsSchema.parse(req.body);
+
+    const source = await uploadAudioSource(
         workspaceId,
         req.session.user.id,
         req.file,

@@ -1,4 +1,7 @@
-import { outputAudioAccessSchema } from "@homeworkcopy/contracts";
+import {
+    outputAudioAccessSchema,
+    type EditOutputContentRequest,
+} from "@homeworkcopy/contracts";
 import { apiFetch, apiFetchVoid, apiFetchWithSchema } from "@/shared/lib/api";
 import type { CreateOutputInput, StudioOutput } from "./types";
 
@@ -43,6 +46,23 @@ export function renameOutput(
         method: "PATCH",
         body: JSON.stringify({ title }),
     });
+}
+
+/**
+ * Replaces an editable output's content with the reader's own edit.
+ *
+ * `PUT` rather than `PATCH`: the payload is the whole deck or table set, so a
+ * partial write can never leave content the viewers cannot render.
+ */
+export function updateOutputContent(
+    workspaceId: string,
+    outputId: string,
+    input: EditOutputContentRequest,
+) {
+    return apiFetch<StudioOutput>(
+        `${outputsPath(workspaceId)}/${outputId}/content`,
+        { method: "PUT", body: JSON.stringify(input) },
+    );
 }
 
 export function regenerateOutput(workspaceId: string, outputId: string) {

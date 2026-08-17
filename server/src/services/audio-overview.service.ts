@@ -13,17 +13,20 @@ import {
     AUDIO_OVERVIEW_SEGMENT_MAX,
     AUDIO_SEGMENT_SOURCE_LABELS_MAX,
     AUDIO_SEGMENT_TEXT_MAX_LENGTH,
+    audioMediaSchema,
     audioOverviewOutputContentSchema,
     audioOverviewScriptSchema,
     audioSpeakerSchema,
     playableAudioOverviewContentSchema,
     DEFAULT_AUDIO_OVERVIEW_OPTIONS,
+    type AudioMedia,
     type AudioOverviewOptions,
     type AudioOverviewOutputContent,
     type AudioOverviewScript,
     type AudioOverviewStyle,
     type AudioSegmentTiming,
     type AudioSpeaker,
+    type AudioVoiceProfile,
     type JsonReadValue,
     type OutputAudioSummary,
     type OutputGenerationOptions,
@@ -449,8 +452,24 @@ export type AudioSynthesisResult = {
     provider: TextToSpeechProvider;
 };
 
+/** One spoken unit handed to a provider, independent of what produced it. */
+export type SpeechSegmentInput = {
+    /** Timing id, which must satisfy {@link audioSegmentTimingSchema}. */
+    id: string;
+    speaker: AudioSpeaker;
+    text: string;
+};
+
+/** Voice settings and per-speaker delivery guidance for one synthesis run. */
+export type SpeechSettings = {
+    voice: AudioVoiceProfile;
+    /** BCP-47 code the text was written in. */
+    language: string;
+    direction: Record<AudioSpeaker, string>;
+};
+
 /**
- * Synthesizes every segment and assembles one playable file.
+ * Synthesizes a script's segments and assembles one playable file.
  *
  * @param script - Grounded script to perform
  * @param options - Persisted generation options
@@ -459,23 +478,51 @@ export type AudioSynthesisResult = {
  * @returns The assembled audio with its timeline, or `null` when cancelled
  * @throws {OutputGenerationError} When synthesis or assembly fails
  */
-export async function synthesizeScript(
+export function synthesizeScript(
     script: AudioOverviewScript,
     options: OutputGenerationOptions,
     provider: TextToSpeechProvider,
     isCurrent: () => Promise<boolean>,
 ): Promise<AudioSynthesisResult | null> {
-    const audio = audioOptionsOf(options);
-    const batches: (typeof script.segments)[] = [];
+    return synthesizeSpeechSegments(
+        script.segments,
+        {
+            voice: audioOptionsOf(options).voice,
+            language: script.language,
+            direction: STYLE_DIRECTION[script.style],
+        },
+        provider,
+        isCurrent,
+    );
+}
+
+/**
+ * Synthesizes spoken segments with bounded concurrency and assembles one file.
+ *
+ * Shared by every narrated output so a new one inherits the same cancellation
+ * checks, per-segment duration measurement, and assembly guarantees.
+ *
+ * @param segments - Segments in playback order
+ * @param settings - Voice, language, and per-speaker delivery guidance
+ * @param provider - Resolved TTS provider
+ * @param isCurrent - Checked between batches so a cancellation stops the work
+ * @returns The assembled audio with its timeline, or `null` when cancelled
+ * @throws {OutputGenerationError} When synthesis or assembly fails
+ */
+export async function synthesizeSpeechSegments(
+    segments: readonly SpeechSegmentInput[],
+    settings: SpeechSettings,
+    provider: TextToSpeechProvider,
+    isCurrent: () => Promise<boolean>,
+): Promise<AudioSynthesisResult | null> {
+    const batches: SpeechSegmentInput[][] = [];
 
     for (
         let index = 0;
-        index < script.segments.length;
+        index < segments.length;
         index += SYNTHESIS_CONCURRENCY
     ) {
-        batches.push(
-            script.segments.slice(index, index + SYNTHESIS_CONCURRENCY),
-        );
+        batches.push([...segments.slice(index, index + SYNTHESIS_CONCURRENCY)]);
     }
 
     const parts: Uint8Array[] = [];
@@ -502,12 +549,10 @@ export async function synthesizeScript(
                 try {
                     return await provider.synthesize({
                         text: segment.text,
-                        voiceProfile: audio.voice,
+                        voiceProfile: settings.voice,
                         speaker: segment.speaker,
-                        language: script.language,
-                        direction: STYLE_DIRECTION[script.style][
-                            segment.speaker
-                        ],
+                        language: settings.language,
+                        direction: settings.direction[segment.speaker],
                     });
                 } catch (caught) {
                     throw new OutputGenerationError(
@@ -549,13 +594,76 @@ export async function synthesizeScript(
     return {
         audio: assembled,
         timings: buildTimings(
-            script.segments.map((segment) => segment.id),
+            segments.map((segment) => segment.id),
             durationsMs,
         ),
         durationMs: durationsMs.reduce((total, value) => total + value, 0),
         voices: [...voices],
         provider,
     };
+}
+
+/** Storage coordinates and the timeline aligned to the file that was stored. */
+export type StoredNarration = {
+    media: AudioMedia;
+    timings: AudioSegmentTiming[];
+};
+
+/**
+ * Uploads assembled narration and returns what to persist alongside it.
+ *
+ * Shared by every narrated output. The object is keyed by the output id and
+ * overwritten, so a regeneration replaces the previous file rather than leaking
+ * a new one.
+ *
+ * @param artifactId - Output the media belongs to, used as the object id
+ * @param synthesis - Result of {@link synthesizeSpeechSegments}
+ * @param voiceProfile - Voice the reader chose, persisted for reproducibility
+ * @returns Validated media metadata plus the aligned transcript timeline
+ * @throws {OutputGenerationError} When the object store rejects the upload
+ */
+export async function storeNarrationAudio(
+    artifactId: string,
+    synthesis: AudioSynthesisResult,
+    voiceProfile: AudioVoiceProfile,
+): Promise<StoredNarration> {
+    try {
+        const stored = await storeAudioObject(synthesis.audio, artifactId);
+
+        return {
+            media: audioMediaSchema.parse({
+                provider: synthesis.provider.id,
+                model: synthesis.provider.model,
+                voiceProfile,
+                voices: synthesis.voices,
+                format: "mp3",
+                bytes: stored.bytes,
+                durationMs: stored.durationMs ?? synthesis.durationMs,
+                storage: {
+                    provider: "cloudinary",
+                    publicId: stored.publicId,
+                    resourceType: "video",
+                },
+                synthesizedAt: new Date().toISOString(),
+            }),
+            timings: alignTimingsToStoredAudio(
+                synthesis.timings,
+                synthesis.durationMs,
+                stored.durationMs,
+            ),
+        };
+    } catch (caught) {
+        if (caught instanceof OutputGenerationError) {
+            throw caught;
+        }
+        throw new OutputGenerationError(
+            "STORAGE",
+            "AUDIO_STORAGE_FAILED",
+            caught instanceof Error
+                ? `Storing the generated audio failed: ${caught.message}`
+                : "Storing the generated audio failed.",
+        );
+    }
 }
 
 /**
@@ -574,46 +682,18 @@ export async function storeAudioOverview(
     synthesis: AudioSynthesisResult,
     options: OutputGenerationOptions,
 ): Promise<PlayableAudioOverviewContent> {
-    try {
-        const stored = await storeAudioObject(synthesis.audio, artifactId);
-        const durationMs = stored.durationMs ?? synthesis.durationMs;
+    const stored = await storeNarrationAudio(
+        artifactId,
+        synthesis,
+        audioOptionsOf(options).voice,
+    );
 
-        return playableAudioOverviewContentSchema.parse({
-            version: AUDIO_OVERVIEW_CONTENT_VERSION,
-            script,
-            timings: alignTimingsToStoredAudio(
-                synthesis.timings,
-                synthesis.durationMs,
-                stored.durationMs,
-            ),
-            media: {
-                provider: synthesis.provider.id,
-                model: synthesis.provider.model,
-                voiceProfile: audioOptionsOf(options).voice,
-                voices: synthesis.voices,
-                format: "mp3",
-                bytes: stored.bytes,
-                durationMs,
-                storage: {
-                    provider: "cloudinary",
-                    publicId: stored.publicId,
-                    resourceType: "video",
-                },
-                synthesizedAt: new Date().toISOString(),
-            },
-        });
-    } catch (caught) {
-        if (caught instanceof OutputGenerationError) {
-            throw caught;
-        }
-        throw new OutputGenerationError(
-            "STORAGE",
-            "AUDIO_STORAGE_FAILED",
-            caught instanceof Error
-                ? `Storing the generated audio failed: ${caught.message}`
-                : "Storing the generated audio failed.",
-        );
-    }
+    return playableAudioOverviewContentSchema.parse({
+        version: AUDIO_OVERVIEW_CONTENT_VERSION,
+        script,
+        timings: stored.timings,
+        media: stored.media,
+    });
 }
 
 /** Denormalized card facts written alongside the content. */

@@ -118,13 +118,29 @@ export function CreateOutputDialog({
     }, [open]);
 
     const { data: capabilities } = useStudioCapabilities();
-    const audioAvailable = capabilities?.audioOverview === true;
+
+    /**
+     * Whether this deployment can produce a type at all. Narrated outputs need a
+     * speech provider and media storage, which may not be configured.
+     */
+    function isTypeSupported(outputType: OutputType): boolean {
+        switch (outputType) {
+            case "AUDIO_OVERVIEW":
+                return capabilities?.audioOverview === true;
+            case "VIDEO_EXPLAINER":
+                return capabilities?.videoExplainer === true;
+            default:
+                return true;
+        }
+    }
+
     const isAudio = type === "AUDIO_OVERVIEW";
+    const isNarrated = isAudio || type === "VIDEO_EXPLAINER";
     const canGenerate =
         !sourcesLoading &&
         !sourcesError &&
         selection.canUseSelection &&
-        (!isAudio || audioAvailable);
+        isTypeSupported(type);
 
     /** A type the reader may pick right now, given sources and configuration. */
     function isTypeAvailable(outputType: OutputType): boolean {
@@ -132,7 +148,7 @@ export function CreateOutputDialog({
             !sourcesLoading &&
             !sourcesError &&
             selection.canUseSelection &&
-            (outputType !== "AUDIO_OVERVIEW" || audioAvailable)
+            isTypeSupported(outputType)
         );
     }
 
@@ -160,8 +176,15 @@ export function CreateOutputDialog({
                     length,
                     locale,
                     focus: focus.trim() || undefined,
-                    ...(isAudio
-                        ? { audio: { style: audioStyle, voice: audioVoice } }
+                    // A video explainer speaks with one narrator, so it uses the
+                    // voice but never the conversation style.
+                    ...(isNarrated
+                        ? {
+                              audio: {
+                                  style: isAudio ? audioStyle : "narration",
+                                  voice: audioVoice,
+                              },
+                          }
                         : {}),
                 },
                 ...selection.request,
@@ -261,9 +284,9 @@ export function CreateOutputDialog({
                                                 const available =
                                                     isTypeAvailable(outputType);
                                                 const unsupported =
-                                                    outputType ===
-                                                        "AUDIO_OVERVIEW" &&
-                                                    !audioAvailable;
+                                                    !isTypeSupported(
+                                                        outputType,
+                                                    );
 
                                                 return (
                                                     <label
@@ -450,8 +473,9 @@ export function CreateOutputDialog({
                             </div>
                         </div>
 
-                        {isAudio ? (
+                        {isNarrated ? (
                             <div className="grid gap-4 sm:grid-cols-2">
+                                {isAudio ? (
                                 <div className="grid gap-2">
                                     <Label htmlFor="audio-style">Format</Label>
                                     <NativeSelect
@@ -480,6 +504,7 @@ export function CreateOutputDialog({
                                         ))}
                                     </NativeSelect>
                                 </div>
+                                ) : null}
 
                                 <div className="grid gap-2">
                                     <Label htmlFor="audio-voice">Voice</Label>

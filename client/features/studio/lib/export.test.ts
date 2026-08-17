@@ -132,6 +132,138 @@ describe("outputToMarkdown", () => {
         expect(markdown).toContain("audio pending");
     });
 
+    test("exports a slide deck with its notes and attributions", () => {
+        const markdown = outputToMarkdown(
+            output({
+                type: "SLIDES",
+                title: "Cell biology deck",
+                content: {
+                    version: 1,
+                    deck: {
+                        title: "Cell biology",
+                        subtitle: "A ten minute tour",
+                        slides: [
+                            {
+                                id: "sl1",
+                                title: "What a cell is",
+                                bullets: ["A membrane", "A genome"],
+                                speakerNotes: "Open with the membrane.",
+                                sourceLabels: ["S1"],
+                            },
+                            {
+                                id: "sl2",
+                                title: "Organelles",
+                                bullets: ["Mitochondria"],
+                                sourceLabels: [],
+                            },
+                            {
+                                id: "sl3",
+                                title: "Recap",
+                                bullets: ["Three ideas"],
+                                sourceLabels: [],
+                            },
+                        ],
+                    },
+                },
+            }),
+        );
+
+        expect(markdown).toContain("_A ten minute tour_");
+        expect(markdown).toContain("## Slide 1: What a cell is");
+        expect(markdown).toContain("- A membrane");
+        expect(markdown).toContain("**Notes:** Open with the membrane.");
+        expect(markdown).toContain("_Sources: [S1]_");
+    });
+
+    test("exports data tables as Markdown tables with a sources column", () => {
+        const markdown = outputToMarkdown(
+            output({
+                type: "DATA_TABLE",
+                title: "Phase comparison",
+                content: {
+                    version: 1,
+                    tables: [
+                        {
+                            id: "t1",
+                            title: "Mitosis phases",
+                            columns: [
+                                { label: "Phase", kind: "text" },
+                                { label: "Marker", kind: "text" },
+                            ],
+                            rows: [
+                                {
+                                    id: "r1",
+                                    cells: ["Prophase", "Chromosomes | condense"],
+                                    sourceLabels: ["S1"],
+                                },
+                                {
+                                    id: "r2",
+                                    cells: ["Metaphase", ""],
+                                    sourceLabels: [],
+                                },
+                            ],
+                        },
+                    ],
+                },
+            }),
+        );
+
+        expect(markdown).toContain("| Phase | Marker | Sources |");
+        expect(markdown).toContain("| --- | --- | --- |");
+        // A pipe inside a value must not split the row.
+        expect(markdown).toContain(
+            "| Prophase | Chromosomes \\| condense | [S1] |",
+        );
+        // An unstated value stays visibly unstated rather than being invented.
+        expect(markdown).toContain("| Metaphase | — | — |");
+    });
+
+    test("exports a video explainer as a readable storyboard", () => {
+        const markdown = outputToMarkdown(
+            output({
+                type: "VIDEO_EXPLAINER",
+                title: "How cells divide",
+                content: {
+                    version: 1,
+                    storyboard: {
+                        title: "How cells divide",
+                        language: "en",
+                        scenes: [
+                            {
+                                id: "s1",
+                                title: "Setting up",
+                                bullets: ["One cell becomes two"],
+                                narration: "Every cell you have came from another.",
+                                sourceLabels: ["S1"],
+                            },
+                            {
+                                id: "s2",
+                                title: "The phases",
+                                bullets: ["Four stages"],
+                                narration: "Division runs in four stages.",
+                                sourceLabels: [],
+                            },
+                            {
+                                id: "s3",
+                                title: "Recap",
+                                bullets: ["Two identical cells"],
+                                narration: "You end with two identical cells.",
+                                sourceLabels: [],
+                            },
+                        ],
+                    },
+                },
+            }),
+        );
+
+        expect(markdown).toContain("## Storyboard");
+        expect(markdown).toContain("### Scene 1: Setting up");
+        expect(markdown).toContain(
+            "**Narration:** Every cell you have came from another. [S1]",
+        );
+        expect(markdown).toContain("narration pending");
+    });
+
     test("explains an output that has no content yet", () => {
         expect(
             outputToMarkdown(output({ status: "PENDING", content: null })),

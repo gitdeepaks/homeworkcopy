@@ -3,7 +3,10 @@
 import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
 import { RefreshCwIcon } from "lucide-react";
-import { readOutputMetadata } from "@homeworkcopy/contracts";
+import {
+    parseOutputContent,
+    readOutputMetadata,
+} from "@homeworkcopy/contracts";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useRegenerateOutput } from "../hooks/use-outputs";
@@ -17,6 +20,7 @@ import { studioRoutes } from "../lib/routes";
 import { isOutputGenerating, type StudioOutput } from "../lib/types";
 import { OutputActionsMenu } from "./output-actions-menu";
 import { OutputStatusBadge, OutputTypeBadge } from "./output-status-badge";
+import { StoryboardStage } from "./viewers/storyboard-stage";
 
 type OutputCardProps = {
     output: StudioOutput;
@@ -34,14 +38,28 @@ export function OutputCard({ output, className }: OutputCardProps) {
     const generating = isOutputGenerating(output.status);
     const options = metadata?.options;
     const audio = metadata?.audio;
+    const video = metadata?.video;
+    const media = audio ?? video;
+
+    // A video explainer's opening frame is its thumbnail: real DOM rather than a
+    // rendered image, so it scales, keeps theme contrast, and stays readable.
+    const parsed =
+        output.type === "VIDEO_EXPLAINER"
+            ? parseOutputContent(output.type, output.content)
+            : null;
+    const openingScene =
+        parsed?.type === "VIDEO_EXPLAINER"
+            ? parsed.data.storyboard.scenes[0]
+            : undefined;
 
     const details = [
         `${sourceCount} source${sourceCount === 1 ? "" : "s"}`,
-        audio?.durationMs === undefined
+        media?.durationMs === undefined
             ? null
-            : formatSpokenDuration(audio.durationMs),
-        audio ? audio.language.toUpperCase() : null,
-        options && !audio ? OUTPUT_LENGTH_LABELS[options.length] : null,
+            : formatSpokenDuration(media.durationMs),
+        media ? media.language.toUpperCase() : null,
+        video ? `${String(video.sceneCount)} scenes` : null,
+        options && !media ? OUTPUT_LENGTH_LABELS[options.length] : null,
         formatDistanceToNow(new Date(output.createdAt), { addSuffix: true }),
     ].filter((detail): detail is string => detail !== null);
 
@@ -59,6 +77,18 @@ export function OutputCard({ output, className }: OutputCardProps) {
                 </div>
                 <OutputActionsMenu output={output} />
             </div>
+
+            {openingScene && parsed?.type === "VIDEO_EXPLAINER" ? (
+                <div aria-hidden className="mt-2">
+                    <StoryboardStage
+                        compact
+                        title={parsed.data.storyboard.title}
+                        scene={openingScene}
+                        index={0}
+                        total={parsed.data.storyboard.scenes.length}
+                    />
+                </div>
+            ) : null}
 
             <Link
                 href={studioRoutes.detail(output.workspaceId, output.id)}

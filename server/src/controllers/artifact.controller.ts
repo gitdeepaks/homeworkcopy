@@ -9,10 +9,12 @@ import {
     listArtifactsForWorkspace,
     regenerateArtifactForWorkspace,
     renameArtifactForWorkspace,
+    updateArtifactContentForWorkspace,
 } from "../services/artifact.service.js";
 import {
     artifactIdParamSchema,
     createArtifactSchema,
+    editArtifactContentSchema,
     renameArtifactSchema,
 } from "../validators/artifact.validator.js";
 import { workspaceIdParamSchema } from "../validators/workspace.validator.js";
@@ -68,6 +70,18 @@ export async function renameArtifact(req: Request, res: Response) {
         artifactId,
         req.session.user.id,
         title,
+    );
+    res.json(artifact);
+}
+
+export async function updateArtifactContent(req: Request, res: Response) {
+    const { workspaceId, artifactId } = artifactIdParamSchema.parse(req.params);
+    const input = editArtifactContentSchema.parse(req.body);
+    const artifact = await updateArtifactContentForWorkspace(
+        workspaceId,
+        artifactId,
+        req.session.user.id,
+        input,
     );
     res.json(artifact);
 }

@@ -11,8 +11,10 @@ import {
     listOutputs,
     regenerateOutput,
     renameOutput,
+    updateOutputContent,
 } from "../lib/api";
 import { isOutputGenerating, type CreateOutputInput } from "../lib/types";
+import type { EditOutputContentRequest } from "@homeworkcopy/contracts";
 
 const GENERATING_POLL_INTERVAL_MS = 3000;
 
@@ -119,6 +121,29 @@ export function useRenameOutput(workspaceId: string) {
             outputId: string;
             title: string;
         }) => renameOutput(workspaceId, outputId, title),
+        onSuccess: (output) => {
+            queryClient.setQueryData(
+                outputKeys(workspaceId).detail(output.id),
+                output,
+            );
+            void queryClient.invalidateQueries({
+                queryKey: outputKeys(workspaceId).all,
+            });
+        },
+    });
+}
+
+export function useUpdateOutputContent(workspaceId: string) {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: ({
+            outputId,
+            input,
+        }: {
+            outputId: string;
+            input: EditOutputContentRequest;
+        }) => updateOutputContent(workspaceId, outputId, input),
         onSuccess: (output) => {
             queryClient.setQueryData(
                 outputKeys(workspaceId).detail(output.id),

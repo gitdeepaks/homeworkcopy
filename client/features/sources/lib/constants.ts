@@ -6,6 +6,7 @@ export const SOURCE_TYPE_LABELS: Record<SourceType, string> = {
     YOUTUBE: "YouTube",
     TEXT: "Text",
     MARKDOWN: "Markdown",
+    AUDIO: "Audio",
 };
 
 export const SOURCE_STATUS_LABELS: Record<SourceStatus, string> = {
@@ -22,6 +23,7 @@ export const SOURCE_TYPES: SourceType[] = [
     "PDF",
     "WEBSITE",
     "YOUTUBE",
+    "AUDIO",
 ];
 
 export const SOURCE_STATUSES: SourceStatus[] = [

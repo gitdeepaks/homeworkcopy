@@ -119,12 +119,16 @@ export function mapOutputProse(
                     nextSteps: content.data.nextSteps.map(transform),
                 },
             };
-        // Card, graph, and spoken content carry no inline markers: an audio
-        // script cites its sources per segment, not mid-sentence.
+        // Card, graph, spoken, and structured content carry no inline markers:
+        // an audio script, a slide, and a table row each cite their sources
+        // structurally rather than mid-sentence.
         case "FLASHCARDS":
         case "QUIZ":
         case "MINDMAP":
         case "AUDIO_OVERVIEW":
+        case "VIDEO_EXPLAINER":
+        case "SLIDES":
+        case "DATA_TABLE":
             return content;
     }
 }

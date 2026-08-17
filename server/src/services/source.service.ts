@@ -1,4 +1,11 @@
 import { z } from "zod";
+import { storedSourceMetadataSchema } from "@homeworkcopy/contracts";
+import {
+    deleteAudioObject,
+    isAudioStorageConfigured,
+    storeSourceAudioObject,
+} from "../lib/audio-storage.js";
+import { getSpeechToTextProvider } from "../lib/stt/index.js";
 import { deleteCloudinaryObject, uploadPdfToCloudinary } from "../lib/cloudinary.js";
 import { enqueueSourceDeletion, enqueueSourceProcessing } from "../lib/source-events.js";
 import { logger } from "../lib/logger.js";
@@ -16,7 +23,11 @@ import {
     type SourceRecord,
 } from "../repositories/source.repository.js";
 import { getWorkspaceByIdForUser } from "./workspace.service.js";
-import { ConflictError, NotFoundError } from "../types/app-error.js";
+import {
+    ConflictError,
+    NotFoundError,
+    ValidationError,
+} from "../types/app-error.js";
 import type { SourceSelection } from "@homeworkcopy/contracts";
 import type {
     CreateSourceInput,
@@ -35,6 +46,7 @@ import { validateGroundingSourceCandidates } from "./grounding-source-selection.
 import {
     canonicalizeSourceUrl,
     checksumContent,
+    verifyAudioUpload,
     verifyPdfUpload,
 } from "../lib/source-ingestion.js";
 
@@ -277,6 +289,120 @@ export async function uploadPdfSource(
 }
 
 /**
+ * Whether this deployment can accept an audio file as a source.
+ *
+ * Needs both durable storage for the file and a transcription provider, so a
+ * reader is never offered an upload that could only fail in the background.
+ */
+export function isAudioSourceIngestionAvailable(): boolean {
+    return getSpeechToTextProvider() !== null && isAudioStorageConfigured();
+}
+
+/**
+ * Validates and uploads an audio file, then queues transcription.
+ *
+ * The file is stored as an authenticated object and transcribed in the
+ * background, which yields timestamped segments — so a citation from an audio
+ * source can point at the moment in the recording that supports it.
+ *
+ * @param workspaceId - Notebook to attach the source to
+ * @param userId - Authenticated user's id
+ * @param file - Multer file buffer from the upload endpoint
+ * @param title - Optional custom title (defaults to the filename)
+ * @param idempotencyKey - Optional client key making a retried upload a no-op
+ * @returns New AUDIO source with storage metadata and status `PENDING`
+ * @throws {ValidationError} When the deployment or the file cannot support it
+ * @throws {ConflictError} When the same recording is already in this notebook
+ */
+export async function uploadAudioSource(
+    workspaceId: string,
+    userId: string,
+    file: Express.Multer.File,
+    title?: string,
+    idempotencyKey?: string,
+) {
+    await getWorkspaceByIdForUser(workspaceId, userId);
+
+    if (!isAudioSourceIngestionAvailable()) {
+        throw new ValidationError(
+            "Audio sources are not available on this deployment yet.",
+        );
+    }
+
+    const { format } = verifyAudioUpload(file);
+    const contentChecksum = checksumContent(file.buffer);
+
+    if (idempotencyKey) {
+        const existing = await findSourceByIdempotencyKey(
+            workspaceId,
+            idempotencyKey,
+        );
+        if (existing) return existing;
+    }
+    const duplicate = await findSourceByChecksum(workspaceId, contentChecksum);
+    if (duplicate) {
+        throw new ConflictError(
+            `This recording already exists as “${duplicate.title}”`,
+        );
+    }
+
+    // Keyed by notebook and checksum: a retry after a failed row insert
+    // overwrites the same object rather than leaving an orphan, while two
+    // notebooks holding the same recording keep separate objects — so deleting
+    // one notebook's source can never break the other's.
+    const stored = await storeSourceAudioObject(
+        file.buffer,
+        `${workspaceId}/${contentChecksum}`,
+        format,
+    );
+
+    try {
+        const created = await createAndProcessSource({
+            workspaceId,
+            type: "AUDIO",
+            title:
+                title?.trim() ||
+                file.originalname.replace(/\.[^.]+$/, "").trim().slice(0, 200) ||
+                "Untitled recording",
+            status: "PENDING",
+            processingStage: "QUEUED",
+            contentChecksum,
+            idempotencyKey,
+            metadata: {
+                fileName: file.originalname,
+                fileSize: stored.bytes,
+                publicId: stored.publicId,
+                resourceType: "video",
+                storageFormat: format,
+                mimeType: file.mimetype,
+                ...(stored.durationMs === null
+                    ? {}
+                    : { durationMs: stored.durationMs }),
+                safetyCheck: "audio-container-verified",
+            },
+        });
+
+        const createdMetadata =
+            storedSourceMetadataSchema.safeParse(created.metadata).data ?? {};
+        if (createdMetadata.publicId !== stored.publicId) {
+            // An idempotent replay resolved to an earlier source, so this
+            // upload's object is unreferenced.
+            await deleteAudioObject(stored.publicId);
+        }
+
+        return created;
+    } catch (error) {
+        await deleteAudioObject(stored.publicId).catch((cleanupError: unknown) => {
+            logger.error(
+                { cleanupError, publicId: stored.publicId },
+                "orphaned audio cleanup failed",
+            );
+        });
+        throw error;
+    }
+}
+
+/**
  * Scrapes a website via Firecrawl and creates a source from the markdown content.
  *
  * @param workspaceId - Workspace to attach the source to
@@ -389,10 +515,23 @@ export async function cleanupSourceById(sourceId: string, workspaceId: string) {
 
     const metadata = z.record(z.string(), z.json()).safeParse(source.metadata).data ?? {};
     const publicId = typeof metadata.publicId === "string" ? metadata.publicId : undefined;
-    const resourceType = metadata.resourceType === "image" ? "image" : "raw";
+    const resourceType =
+        metadata.resourceType === "image"
+            ? "image"
+            : metadata.resourceType === "video"
+              ? "video"
+              : "raw";
     try {
         await removeSourceFromIndex(workspaceId, sourceId);
-        if (publicId) await deleteCloudinaryObject(publicId, resourceType);
+        if (publicId) {
+            // Audio sources are stored as authenticated assets, so they must be
+            // destroyed with that delivery type; PDFs use the default upload type.
+            await deleteCloudinaryObject(
+                publicId,
+                resourceType,
+                resourceType === "video" ? "authenticated" : "upload",
+            );
+        }
         await deleteSourceRecord(sourceId);
         logger.info(
             { sourceId, workspaceId, binaryDeleted: Boolean(publicId) },

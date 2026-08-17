@@ -98,6 +98,8 @@ const OUTPUT_FAILURE_STATUS: Record<OutputFailureCode, number> = {
     SYNTHESIS_FAILED: 502,
     AUDIO_ASSEMBLY_FAILED: 502,
     AUDIO_STORAGE_FAILED: 502,
+    VIDEO_UNAVAILABLE: 503,
+    STORYBOARD_NOT_GROUNDED: 502,
 };
 
 /**
@@ -111,6 +113,17 @@ const RETRIABLE_OUTPUT_FAILURES: ReadonlySet<OutputFailureCode> = new Set([
     "AUDIO_ASSEMBLY_FAILED",
     "AUDIO_STORAGE_FAILED",
 ]);
+
+/**
+ * Raised when a reader tries to hand-edit content that is not editable, either
+ * because the output type has no editable shape or because it is mid-generation.
+ */
+export class OutputNotEditableError extends AppError {
+    constructor(message: string) {
+        super(409, "OUTPUT_NOT_EDITABLE", message);
+        this.name = "OutputNotEditableError";
+    }
+}
 
 export class WebSearchUnavailableError extends AppError {
     constructor() {

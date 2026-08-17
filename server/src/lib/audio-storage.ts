@@ -11,6 +11,12 @@ import { z } from "zod";
 import { logger } from "./logger.js";
 
 const AUDIO_FOLDER = "chaibook/audio";
+/**
+ * Uploaded audio sources live in their own folder so generated media and reader
+ * uploads have separate retention and cost stories, and so a cleanup that walks
+ * one folder can never delete the other.
+ */
+const SOURCE_AUDIO_FOLDER = "chaibook/source-audio";
 const RESOURCE_TYPE = "video";
 
 /** How long a minted playback/download URL is advertised as usable. */
@@ -136,6 +142,96 @@ export async function storeAudioObject(
                 ? null
                 : Math.round(parsed.data.duration * 1_000),
     };
+}
+
+/**
+ * Uploads a reader's audio file as an authenticated asset.
+ *
+ * The container format is preserved rather than transcoded: the transcription
+ * provider accepts every format the upload validator allows, and re-encoding
+ * would cost time and shift the timestamps citations depend on.
+ *
+ * @param audio - Complete file bytes as uploaded
+ * @param objectId - Deterministic id used as the asset name
+ * @param format - Container extension, e.g. `mp3` or `m4a`
+ * @returns Storage coordinates persisted on the source
+ * @throws {Error} When storage is not configured or the upload is rejected
+ */
+export async function storeSourceAudioObject(
+    audio: Uint8Array,
+    objectId: string,
+    format: string,
+): Promise<StoredAudioObject> {
+    if (!configure()) {
+        throw new Error("Audio storage is not configured on the server");
+    }
+
+    const raw = await new Promise<unknown>((resolve, reject) => {
+        const upload = cloudinary.uploader.upload_stream(
+            {
+                resource_type: RESOURCE_TYPE,
+                type: "authenticated",
+                folder: SOURCE_AUDIO_FOLDER,
+                public_id: objectId,
+                // A retried import must replace the previous attempt.
+                overwrite: true,
+                invalidate: true,
+                format,
+            },
+            (error, result) => {
+                if (error) {
+                    reject(new Error(error.message));
+                    return;
+                }
+                resolve(result);
+            },
+        );
+
+        upload.end(Buffer.from(audio));
+    });
+
+    const parsed = uploadResponseSchema.safeParse(raw);
+    if (!parsed.success) {
+        throw new Error("Audio storage returned an unusable upload response");
+    }
+
+    return {
+        publicId: parsed.data.public_id,
+        bytes: parsed.data.bytes,
+        durationMs:
+            parsed.data.duration === undefined
+                ? null
+                : Math.round(parsed.data.duration * 1_000),
+    };
+}
+
+/**
+ * Mints a signed delivery URL for a stored audio source.
+ *
+ * Used by the background pipeline to read the file back for transcription, and
+ * by the source viewer to play it. It is minted per use rather than persisted,
+ * so a signature is never stored where it could outlive its validity.
+ *
+ * @param publicId - Storage id persisted on the source
+ * @param format - Container extension the object was stored with
+ * @returns A signed URL for the stored object
+ * @throws {Error} When storage is not configured
+ */
+export function createSignedSourceAudioUrl(
+    publicId: string,
+    format: string,
+): string {
+    if (!configure()) {
+        throw new Error("Audio storage is not configured on the server");
+    }
+
+    return cloudinary.url(publicId, {
+        resource_type: RESOURCE_TYPE,
+        type: "authenticated",
+        format,
+        sign_url: true,
+        secure: true,
+    });
 }
 
 /**

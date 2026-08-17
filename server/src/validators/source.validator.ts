@@ -30,7 +30,8 @@ export const createSourceSchema = createSourceInputSchema;
 export const importWebsiteSchema = importWebsiteInputSchema;
 export const importYoutubeSchema = importYoutubeInputSchema;
 
-export const uploadPdfFieldsSchema = z.object({
+/** Multipart fields accepted alongside a PDF or audio upload. */
+export const uploadFileFieldsSchema = z.object({
     title: z.string().trim().min(1).max(SOURCE_TITLE_MAX_LENGTH).optional(),
 });
 

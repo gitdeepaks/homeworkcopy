@@ -9,6 +9,7 @@ import {
     listArtifacts,
     regenerateArtifact,
     renameArtifact,
+    updateArtifactContent,
 } from "../controllers/artifact.controller.js";
 import { asyncHandler } from "../utils/async-handler.js";
 import { generationRateLimit } from "../middleware/rate-limit.middleware.js";
@@ -20,6 +21,10 @@ artifactRoutes.post("/", generationRateLimit, asyncHandler(createArtifact));
 artifactRoutes.get("/:artifactId", asyncHandler(getArtifact));
 artifactRoutes.get("/:artifactId/audio", asyncHandler(getArtifactAudio));
 artifactRoutes.patch("/:artifactId", asyncHandler(renameArtifact));
+artifactRoutes.put(
+    "/:artifactId/content",
+    asyncHandler(updateArtifactContent),
+);
 artifactRoutes.post(
     "/:artifactId/regenerate",
     generationRateLimit,

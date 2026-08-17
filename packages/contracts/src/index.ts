@@ -6,6 +6,7 @@ export const sourceTypeSchema = z.enum([
     "YOUTUBE",
     "TEXT",
     "MARKDOWN",
+    "AUDIO",
 ]);
 
 export type SourceType = z.infer<typeof sourceTypeSchema>;
@@ -27,6 +28,13 @@ export const SOURCE_CONTENT_MAX_LENGTH = 750_000;
 export const SOURCE_EXTRACTED_TEXT_MAX_LENGTH = 2_000_000;
 export const SOURCE_TRANSCRIPT_SEGMENT_MAX = 25_000;
 export const SOURCE_UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
+/**
+ * Upload ceiling for audio sources.
+ *
+ * Kept at the smallest per-file limit across hosted transcription vendors, so a
+ * file that is accepted here can always be transcribed.
+ */
+export const SOURCE_AUDIO_UPLOAD_MAX_BYTES = 25 * 1024 * 1024;
 export const SOURCE_BATCH_MAX_ITEMS = 10;
 export const NOTEBOOK_SOURCE_MAX = 100;
 export const NOTEBOOK_PROCESSING_MAX = 5;
@@ -265,17 +273,59 @@ export const youtubeSourceMetadataSchema = sourceMetadataCommonSchema.extend({
 
 export const textSourceMetadataSchema = sourceMetadataCommonSchema;
 
+/** Container formats accepted for an audio source upload. */
+export const SOURCE_AUDIO_MIME_TYPES: readonly string[] = [
+    "audio/mpeg",
+    "audio/mp3",
+    "audio/mp4",
+    "audio/m4a",
+    "audio/x-m4a",
+    "audio/wav",
+    "audio/x-wav",
+    "audio/webm",
+    "audio/ogg",
+    "audio/flac",
+];
+
+export const audioSourceMetadataSchema = sourceMetadataCommonSchema.extend({
+    fileUrl: z.url({ protocol: /^https?$/ }).optional(),
+    fileName: z.string().min(1).optional(),
+    fileSize: z.number().int().nonnegative().optional(),
+    publicId: z.string().min(1).optional(),
+    resourceType: z.literal("video").optional(),
+    /**
+     * Container extension the object was stored with, resolved from the file's
+     * own bytes. The uploaded filename can disagree with them, so this — not the
+     * extension — is what a signed delivery URL must be built from.
+     */
+    storageFormat: z.string().min(1).optional(),
+    mimeType: z.string().min(1).optional(),
+    durationMs: z.number().int().nonnegative().optional(),
+    /** Language the transcription provider detected, when it reports one. */
+    detectedLanguage: z.string().min(1).optional(),
+    transcriptProvider: z.string().min(1).optional(),
+    transcriptSegments: z.array(transcriptSegmentSchema).optional(),
+    safetyCheck: z.literal("audio-container-verified").optional(),
+});
+
 export const storedSourceMetadataSchema = sourceMetadataCommonSchema.extend({
     fileUrl: z.url({ protocol: /^https?$/ }).optional(),
     fileName: z.string().min(1).optional(),
     fileSize: z.number().int().nonnegative().optional(),
     publicId: z.string().min(1).optional(),
-    resourceType: z.enum(["raw", "image"]).optional(),
+    resourceType: z.enum(["raw", "image", "video"]).optional(),
     pageCount: z.number().int().positive().optional(),
-    safetyCheck: z.literal("pdf-signature-verified").optional(),
+    safetyCheck: z
+        .enum(["pdf-signature-verified", "audio-container-verified"])
+        .optional(),
     importedFrom: z.string().min(1).optional(),
     sourceUrl: z.url({ protocol: /^https?$/ }).optional(),
     videoId: z.string().regex(/^[\w-]{11}$/).optional(),
+    storageFormat: z.string().min(1).optional(),
+    mimeType: z.string().min(1).optional(),
+    durationMs: z.number().int().nonnegative().optional(),
+    detectedLanguage: z.string().min(1).optional(),
+    transcriptProvider: z.string().min(1).optional(),
     transcriptSegments: z.array(transcriptSegmentSchema).optional(),
 });
 
@@ -313,6 +363,10 @@ export const sourceSchema = z.discriminatedUnion("type", [
     sourceRecordBaseSchema.extend({
         type: z.literal("MARKDOWN"),
         metadata: textSourceMetadataSchema.nullable(),
+    }),
+    sourceRecordBaseSchema.extend({
+        type: z.literal("AUDIO"),
+        metadata: audioSourceMetadataSchema.nullable(),
     }),
 ]);
 
@@ -392,6 +446,9 @@ export const outputTypeSchema = z.enum([
     "TIMELINE",
     "BRIEFING",
     "AUDIO_OVERVIEW",
+    "SLIDES",
+    "DATA_TABLE",
+    "VIDEO_EXPLAINER",
 ]);
 
 export const outputStatusSchema = z.enum([
@@ -445,9 +502,29 @@ export const OUTPUT_TYPE_GROUP: Record<OutputType, OutputGroup> = {
     TIMELINE: "writing",
     BRIEFING: "writing",
     AUDIO_OVERVIEW: "featured-media",
+    VIDEO_EXPLAINER: "featured-media",
+    SLIDES: "writing",
+    DATA_TABLE: "writing",
 };
 
 export const OUTPUT_TYPES: readonly OutputType[] = outputTypeSchema.options;
+
+/**
+ * Output types whose generated content the reader may edit in place.
+ *
+ * Editing is only offered for structured outputs whose shape survives a
+ * round-trip through the same schema the generator produced, so an edit can
+ * never leave content the viewers cannot render.
+ */
+export const EDITABLE_OUTPUT_TYPES: readonly OutputType[] = [
+    "SLIDES",
+    "DATA_TABLE",
+];
+
+/** Whether {@link EDITABLE_OUTPUT_TYPES} covers a type. */
+export function isEditableOutputType(type: OutputType): boolean {
+    return EDITABLE_OUTPUT_TYPES.includes(type);
+}
 
 export const outputLengthSchema = z.enum(["short", "standard", "deep"]);
 export const outputLocaleSchema = z
@@ -579,6 +656,8 @@ export const outputFailureCodeSchema = z.enum([
     "SYNTHESIS_FAILED",
     "AUDIO_ASSEMBLY_FAILED",
     "AUDIO_STORAGE_FAILED",
+    "VIDEO_UNAVAILABLE",
+    "STORYBOARD_NOT_GROUNDED",
 ]);
 
 /**
@@ -617,6 +696,24 @@ export const outputAudioSummarySchema = z.object({
 
 export type OutputAudioSummary = z.infer<typeof outputAudioSummarySchema>;
 
+/**
+ * Compact video-explainer facts denormalized onto the output row.
+ *
+ * Mirrors {@link outputAudioSummarySchema}: `content.media` stays authoritative,
+ * while a Studio card reads duration, language, and scene count without parsing
+ * a full storyboard, and a retry learns whether the persisted storyboard still
+ * matches the requested sources and options.
+ */
+export const outputVideoSummarySchema = z.object({
+    voice: audioVoiceProfileSchema,
+    language: outputLocaleSchema,
+    sceneCount: z.number().int().positive(),
+    durationMs: z.number().int().nonnegative().optional(),
+    storyboardFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+});
+
+export type OutputVideoSummary = z.infer<typeof outputVideoSummarySchema>;
+
 export const outputMetadataSchema = z.object({
     version: z.literal(OUTPUT_METADATA_VERSION),
     generatedAt: z.iso.datetime().optional(),
@@ -626,6 +723,9 @@ export const outputMetadataSchema = z.object({
     sourceSnapshot: outputSourceSnapshotSchema.optional(),
     sourceLabels: z.array(outputSourceLabelSchema).optional(),
     audio: outputAudioSummarySchema.optional(),
+    video: outputVideoSummarySchema.optional(),
+    /** Set when the reader last edited the generated content by hand. */
+    editedAt: z.iso.datetime().optional(),
     metrics: outputMetricsSchema.optional(),
     failure: z
         .object({
@@ -837,6 +937,159 @@ export const briefingOutputContentSchema = z.object({
     nextSteps: z.array(z.string().trim().min(1)).max(10),
 });
 
+/* ------------------------ Structured deliverables ------------------------- */
+
+/**
+ * Inline attribution marker a generated output may carry, e.g. `S1`.
+ *
+ * Structured outputs attach labels to the slide, row, or scene they support
+ * rather than embedding them in prose, so a reader can open the evidence behind
+ * one specific claim.
+ */
+export const OUTPUT_SOURCE_LABEL_PATTERN = /^S[1-9]\d*$/;
+
+/** Upper bound on labels attached to a single structured element. */
+export const OUTPUT_SOURCE_LABELS_MAX = 6;
+
+const structuredSourceLabelsSchema = z
+    .array(z.string().regex(OUTPUT_SOURCE_LABEL_PATTERN))
+    .max(OUTPUT_SOURCE_LABELS_MAX)
+    .refine(
+        (labels) => new Set(labels).size === labels.length,
+        "Source labels must be unique",
+    );
+
+export const SLIDES_CONTENT_VERSION = 1;
+export const SLIDE_MIN = 3;
+export const SLIDE_MAX = 30;
+export const SLIDE_BULLET_MAX = 6;
+export const SLIDE_TITLE_MAX_LENGTH = 120;
+export const SLIDE_BULLET_MAX_LENGTH = 300;
+export const SLIDE_NOTES_MAX_LENGTH = 1_200;
+
+const slideIdSchema = z.string().regex(/^sl[1-9]\d*$/);
+
+export const slideSchema = z.object({
+    id: slideIdSchema,
+    title: z.string().trim().min(1).max(SLIDE_TITLE_MAX_LENGTH),
+    bullets: z
+        .array(z.string().trim().min(1).max(SLIDE_BULLET_MAX_LENGTH))
+        .min(1)
+        .max(SLIDE_BULLET_MAX),
+    /** Presenter guidance. Never spoken by a synthesizer, unlike a scene. */
+    speakerNotes: z.string().trim().min(1).max(SLIDE_NOTES_MAX_LENGTH).optional(),
+    sourceLabels: structuredSourceLabelsSchema,
+});
+
+export const slideDeckSchema = z.object({
+    title: z.string().trim().min(1).max(SLIDE_TITLE_MAX_LENGTH),
+    subtitle: z.string().trim().min(1).max(SLIDE_TITLE_MAX_LENGTH).optional(),
+    slides: z
+        .array(slideSchema)
+        .min(SLIDE_MIN)
+        .max(SLIDE_MAX)
+        .refine(
+            (slides) =>
+                new Set(slides.map((slide) => slide.id)).size === slides.length,
+            "Slide ids must be unique",
+        ),
+});
+
+export const slidesOutputContentSchema = z.object({
+    version: z.literal(SLIDES_CONTENT_VERSION),
+    deck: slideDeckSchema,
+});
+
+export const DATA_TABLE_CONTENT_VERSION = 1;
+export const DATA_TABLE_MAX = 6;
+export const DATA_TABLE_COLUMN_MAX = 8;
+export const DATA_TABLE_ROW_MAX = 200;
+export const DATA_TABLE_CELL_MAX_LENGTH = 500;
+
+const dataTableIdSchema = z.string().regex(/^t[1-9]\d*$/);
+const dataTableRowIdSchema = z.string().regex(/^r[1-9]\d*$/);
+
+/**
+ * How a column should be read. Purely presentational: every cell is persisted
+ * as the text the sources used, so a date or figure is never silently reformatted
+ * into something the sources do not say.
+ */
+export const dataTableColumnKindSchema = z.enum(["text", "number", "date"]);
+
+export const dataTableColumnSchema = z.object({
+    label: z.string().trim().min(1).max(SLIDE_TITLE_MAX_LENGTH),
+    kind: dataTableColumnKindSchema,
+});
+
+export const dataTableRowSchema = z.object({
+    id: dataTableRowIdSchema,
+    cells: z
+        .array(z.string().trim().max(DATA_TABLE_CELL_MAX_LENGTH))
+        .min(1)
+        .max(DATA_TABLE_COLUMN_MAX),
+    sourceLabels: structuredSourceLabelsSchema,
+});
+
+export const dataTableSchema = z
+    .object({
+        id: dataTableIdSchema,
+        title: z.string().trim().min(1).max(SLIDE_TITLE_MAX_LENGTH),
+        caption: z.string().trim().min(1).max(SLIDE_NOTES_MAX_LENGTH).optional(),
+        columns: z
+            .array(dataTableColumnSchema)
+            .min(1)
+            .max(DATA_TABLE_COLUMN_MAX),
+        rows: z.array(dataTableRowSchema).min(1).max(DATA_TABLE_ROW_MAX),
+    })
+    .refine(
+        (table) =>
+            table.rows.every((row) => row.cells.length === table.columns.length),
+        "Every row must have one cell per column",
+    )
+    .refine(
+        (table) =>
+            new Set(table.rows.map((row) => row.id)).size === table.rows.length,
+        "Row ids must be unique",
+    );
+
+export const dataTableOutputContentSchema = z.object({
+    version: z.literal(DATA_TABLE_CONTENT_VERSION),
+    tables: z.array(dataTableSchema).min(1).max(DATA_TABLE_MAX),
+});
+
+export type Slide = z.infer<typeof slideSchema>;
+export type SlideDeck = z.infer<typeof slideDeckSchema>;
+export type SlidesOutputContent = z.infer<typeof slidesOutputContentSchema>;
+export type DataTable = z.infer<typeof dataTableSchema>;
+export type DataTableColumn = z.infer<typeof dataTableColumnSchema>;
+export type DataTableColumnKind = z.infer<typeof dataTableColumnKindSchema>;
+export type DataTableRow = z.infer<typeof dataTableRowSchema>;
+export type DataTableOutputContent = z.infer<
+    typeof dataTableOutputContentSchema
+>;
+
+/**
+ * A reader's hand edit of generated content.
+ *
+ * The payload is the same shape the generator produces, so an edited output is
+ * indistinguishable from a generated one to every viewer and exporter. Only the
+ * types in {@link EDITABLE_OUTPUT_TYPES} appear here.
+ */
+export const editOutputContentRequestSchema = z.discriminatedUnion("type", [
+    z.object({
+        type: z.literal("SLIDES"),
+        deck: slideDeckSchema,
+    }),
+    z.object({
+        type: z.literal("DATA_TABLE"),
+        tables: z.array(dataTableSchema).min(1).max(DATA_TABLE_MAX),
+    }),
+]);
+
+export type EditOutputContentRequest = z.infer<
+    typeof editOutputContentRequestSchema
+>;
+
 /* --------------------------- Audio Overview ------------------------------- */
 
 export const AUDIO_OVERVIEW_CONTENT_VERSION = 1;
@@ -977,6 +1230,177 @@ export const outputAudioAccessSchema = z.object({
 
 export type OutputAudioAccess = z.infer<typeof outputAudioAccessSchema>;
 
+/* ------------------------- Video-style explainer -------------------------- */
+
+export const VIDEO_EXPLAINER_CONTENT_VERSION = 1;
+export const VIDEO_SCENE_MIN = 3;
+export const VIDEO_SCENE_MAX = 24;
+export const VIDEO_SCENE_BULLET_MAX = 5;
+/** Narration length ceiling, matching the audio segment limit it is spoken as. */
+export const VIDEO_NARRATION_MAX_LENGTH = AUDIO_SEGMENT_TEXT_MAX_LENGTH;
+
+/**
+ * Scene ids share the audio segment id space on purpose: a scene's narration is
+ * one synthesized segment, so {@link audioSegmentTimingSchema} times both.
+ */
+const videoSceneIdSchema = z.string().regex(/^s[1-9]\d*$/);
+
+/**
+ * One beat of a narrated explainer: what is on screen, and what is said over it.
+ *
+ * The on-screen text and the narration are separate fields because a caption
+ * track must repeat what was spoken, not what was displayed.
+ */
+export const videoSceneSchema = z.object({
+    id: videoSceneIdSchema,
+    title: z.string().trim().min(1).max(SLIDE_TITLE_MAX_LENGTH),
+    bullets: z
+        .array(z.string().trim().min(1).max(SLIDE_BULLET_MAX_LENGTH))
+        .min(1)
+        .max(VIDEO_SCENE_BULLET_MAX),
+    narration: z.string().trim().min(1).max(VIDEO_NARRATION_MAX_LENGTH),
+    sourceLabels: structuredSourceLabelsSchema,
+});
+
+export const videoStoryboardSchema = z.object({
+    title: z.string().trim().min(1).max(SLIDE_TITLE_MAX_LENGTH),
+    language: outputLocaleSchema,
+    scenes: z
+        .array(videoSceneSchema)
+        .min(VIDEO_SCENE_MIN)
+        .max(VIDEO_SCENE_MAX)
+        .refine(
+            (scenes) =>
+                new Set(scenes.map((scene) => scene.id)).size === scenes.length,
+            "Scene ids must be unique",
+        )
+        .refine(
+            (scenes) => scenes.some((scene) => scene.sourceLabels.length > 0),
+            "At least one scene must cite a source",
+        ),
+});
+
+/**
+ * Video-explainer content.
+ *
+ * `media` and `timings` are absent while the storyboard exists but narration has
+ * not been synthesized, which is what a retry-from-stage reads back.
+ */
+export const videoExplainerOutputContentSchema = z.object({
+    version: z.literal(VIDEO_EXPLAINER_CONTENT_VERSION),
+    storyboard: videoStoryboardSchema,
+    timings: z.array(audioSegmentTimingSchema).optional(),
+    media: audioMediaSchema.optional(),
+});
+
+/** Video-explainer content that has finished synthesis and can be played. */
+export const playableVideoExplainerContentSchema =
+    videoExplainerOutputContentSchema.extend({
+        timings: z.array(audioSegmentTimingSchema).min(1),
+        media: audioMediaSchema,
+    });
+
+export type VideoScene = z.infer<typeof videoSceneSchema>;
+export type VideoStoryboard = z.infer<typeof videoStoryboardSchema>;
+export type VideoExplainerOutputContent = z.infer<
+    typeof videoExplainerOutputContentSchema
+>;
+export type PlayableVideoExplainerContent = z.infer<
+    typeof playableVideoExplainerContentSchema
+>;
+
+/**
+ * Reads video-explainer content that is ready to play.
+ *
+ * @param value - Raw `content` JSON column value
+ * @returns Content with media and timings, or `null` when it is not playable
+ */
+export function parsePlayableVideoExplainer(
+    value: JsonReadValue | undefined,
+): PlayableVideoExplainerContent | null {
+    if (value === null || value === undefined) {
+        return null;
+    }
+    const parsed = playableVideoExplainerContentSchema.safeParse(value);
+    return parsed.success ? parsed.data : null;
+}
+
+/** One caption cue in playback order. */
+export type CaptionCue = {
+    id: string;
+    startMs: number;
+    endMs: number;
+    text: string;
+};
+
+/**
+ * Pairs each scene's narration with the slice of audio it was spoken over.
+ *
+ * @param content - Playable video-explainer content
+ * @returns Cues in playback order, skipping scenes that were never timed
+ */
+export function videoExplainerCaptionCues(
+    content: PlayableVideoExplainerContent,
+): CaptionCue[] {
+    const narrationById = new Map(
+        content.storyboard.scenes.map((scene) => [scene.id, scene.narration]),
+    );
+
+    return content.timings.flatMap((timing) => {
+        const text = narrationById.get(timing.segmentId);
+        return text === undefined
+            ? []
+            : [
+                  {
+                      id: timing.segmentId,
+                      startMs: timing.startMs,
+                      endMs: timing.endMs,
+                      text,
+                  },
+              ];
+    });
+}
+
+function formatVttTimestamp(milliseconds: number): string {
+    const total = Math.max(0, Math.round(milliseconds));
+    const hours = Math.floor(total / 3_600_000);
+    const minutes = Math.floor((total % 3_600_000) / 60_000);
+    const seconds = Math.floor((total % 60_000) / 1_000);
+    const millis = total % 1_000;
+
+    return [
+        String(hours).padStart(2, "0"),
+        String(minutes).padStart(2, "0"),
+        `${String(seconds).padStart(2, "0")}.${String(millis).padStart(3, "0")}`,
+    ].join(":");
+}
+
+/**
+ * Renders cues as a WebVTT document a `<track>` element can consume.
+ *
+ * Cue text is flattened to a single line because a blank line ends a cue and
+ * `-->` would start a new timing row; neither may come from generated prose.
+ *
+ * @param cues - Cues in playback order
+ * @returns A complete WebVTT document
+ */
+export function buildWebVtt(cues: readonly CaptionCue[]): string {
+    const blocks = cues.map((cue) => {
+        const text = cue.text
+            .replace(/\s+/g, " ")
+            .replace(/-->/g, "→")
+            .trim();
+
+        return [
+            cue.id,
+            `${formatVttTimestamp(cue.startMs)} --> ${formatVttTimestamp(cue.endMs)}`,
+            text,
+        ].join("\n");
+    });
+
+    return ["WEBVTT", "", ...blocks.map((block) => `${block}\n`)].join("\n");
+}
+
 /**
  * Optional features this deployment can actually deliver.
  *
@@ -986,6 +1410,9 @@ export type OutputAudioAccess = z.infer<typeof outputAudioAccessSchema>;
 export const studioCapabilitiesSchema = z.object({
     version: z.literal(1),
     audioOverview: z.boolean(),
+    videoExplainer: z.boolean(),
+    /** Whether an audio file can be uploaded and transcribed as a source. */
+    audioSources: z.boolean(),
 });
 
 export type StudioCapabilities = z.infer<typeof studioCapabilitiesSchema>;
@@ -1019,7 +1446,10 @@ export type OutputContent =
     | { type: "FAQ"; data: FaqOutputContent }
     | { type: "TIMELINE"; data: TimelineOutputContent }
     | { type: "BRIEFING"; data: BriefingOutputContent }
-    | { type: "AUDIO_OVERVIEW"; data: AudioOverviewOutputContent };
+    | { type: "AUDIO_OVERVIEW"; data: AudioOverviewOutputContent }
+    | { type: "SLIDES"; data: SlidesOutputContent }
+    | { type: "DATA_TABLE"; data: DataTableOutputContent }
+    | { type: "VIDEO_EXPLAINER"; data: VideoExplainerOutputContent };
 
 /**
  * Validates stored or freshly generated output content against the schema for
@@ -1082,5 +1512,195 @@ export function parseOutputContent(
             const parsed = audioOverviewOutputContentSchema.safeParse(value);
             return parsed.success ? { type, data: parsed.data } : null;
         }
+        case "SLIDES": {
+            const parsed = slidesOutputContentSchema.safeParse(value);
+            return parsed.success ? { type, data: parsed.data } : null;
+        }
+        case "DATA_TABLE": {
+            const parsed = dataTableOutputContentSchema.safeParse(value);
+            return parsed.success ? { type, data: parsed.data } : null;
+        }
+        case "VIDEO_EXPLAINER": {
+            const parsed = videoExplainerOutputContentSchema.safeParse(value);
+            return parsed.success ? { type, data: parsed.data } : null;
+        }
     }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                              Notebook notes                                */
+/* -------------------------------------------------------------------------- */
+
+export const NOTE_TITLE_MAX_LENGTH = 120;
+export const NOTE_CONTENT_MAX_LENGTH = 20_000;
+export const NOTE_EXCERPT_MAX_LENGTH = 2_000;
+export const NOTE_CITATIONS_MAX = 25;
+export const NOTE_CITATIONS_VERSION = 1;
+
+/**
+ * Whether notes are indexed and retrieved as grounding material.
+ *
+ * Deliberately `false`. A note is the reader's own writing, so indexing it would
+ * let a model cite the reader's paraphrase back to them as if it were evidence,
+ * and would change what "grounded in your sources" means without them asking.
+ * Notes therefore carry citations *to* sources and never become one. Flipping
+ * this requires a distinct user-authored source class, its own processing
+ * version, and an explicit reader opt-in — not a change to this constant alone.
+ */
+export const NOTES_PARTICIPATE_IN_GROUNDING = false;
+
+/** Where a note came from, which decides how its citations were captured. */
+export const noteOriginSchema = z.enum(["MANUAL", "CHAT", "OUTPUT"]);
+
+export type NoteOrigin = z.infer<typeof noteOriginSchema>;
+
+/**
+ * A citation as submitted by a client: which source, which location, and the
+ * text being quoted.
+ *
+ * The source's type and title are deliberately absent. They are read from the
+ * source record when the note is saved, so a client can never assert facts about
+ * a source — only point at one it already has access to.
+ */
+export const noteCitationInputSchema = z.object({
+    sourceId: z.string().min(1),
+    excerpt: z.string().max(NOTE_EXCERPT_MAX_LENGTH),
+    page: z.number().int().positive().optional(),
+    chunkId: z.string().min(1).optional(),
+    chunkIndex: z.number().int().nonnegative().optional(),
+    timestamp: z.number().finite().nonnegative().optional(),
+});
+
+/**
+ * A note's persisted pointer back into a source location.
+ *
+ * Deliberately narrower than {@link citationSchema}: a note cites places in the
+ * reader's own notebook, so there is no display label to keep stable and no web
+ * result to attribute. Location fields mirror the chat contract so the same
+ * in-place source viewer opens both.
+ */
+export const noteCitationSchema = noteCitationInputSchema.extend({
+    sourceType: sourceTypeSchema,
+    title: z.string().min(1),
+});
+
+export const noteCitationEnvelopeSchema = z.object({
+    version: z.literal(NOTE_CITATIONS_VERSION),
+    items: z
+        .array(noteCitationSchema)
+        .max(NOTE_CITATIONS_MAX)
+        .refine(
+            (items) =>
+                new Set(
+                    items.map(
+                        (item) =>
+                            `${item.sourceId}:${item.chunkId ?? item.chunkIndex ?? ""}:${item.excerpt}`,
+                    ),
+                ).size === items.length,
+            "Note citations must be unique",
+        ),
+});
+
+/** The chat answer or Studio output an excerpt was saved from. */
+export const noteSavedFromSchema = z.discriminatedUnion("kind", [
+    z.object({
+        kind: z.literal("chat"),
+        conversationId: z.string().min(1),
+        messageId: z.string().min(1),
+    }),
+    z.object({
+        kind: z.literal("output"),
+        outputId: z.string().min(1),
+    }),
+]);
+
+const noteTitleSchema = z.string().trim().min(1).max(NOTE_TITLE_MAX_LENGTH);
+const noteContentSchema = z
+    .string()
+    .trim()
+    .min(1, "A note needs some text")
+    .max(NOTE_CONTENT_MAX_LENGTH);
+
+export const createNoteRequestSchema = z.object({
+    title: noteTitleSchema.optional(),
+    content: noteContentSchema,
+    origin: noteOriginSchema.default("MANUAL"),
+    citations: z
+        .array(noteCitationInputSchema)
+        .max(NOTE_CITATIONS_MAX)
+        .optional(),
+    savedFrom: noteSavedFromSchema.optional(),
+});
+
+export const updateNoteRequestSchema = z
+    .object({
+        title: noteTitleSchema.optional(),
+        content: noteContentSchema.optional(),
+        citations: z
+            .array(noteCitationInputSchema)
+            .max(NOTE_CITATIONS_MAX)
+            .optional(),
+    })
+    .refine(
+        (input) =>
+            input.title !== undefined ||
+            input.content !== undefined ||
+            input.citations !== undefined,
+        "Provide at least one field to update",
+    );
+
+export const noteSchema = z.object({
+    id: z.string().min(1),
+    workspaceId: z.string().min(1),
+    title: z.string().min(1),
+    content: z.string(),
+    origin: noteOriginSchema,
+    /** Sources this note cites, derived from its citations by the server. */
+    sourceIds: z.array(z.string().min(1)),
+    citations: noteCitationEnvelopeSchema.nullable(),
+    savedFrom: noteSavedFromSchema.nullable(),
+    createdAt: z.iso.datetime(),
+    updatedAt: z.iso.datetime(),
+});
+
+export type NoteCitationInput = z.infer<typeof noteCitationInputSchema>;
+export type NoteCitation = z.infer<typeof noteCitationSchema>;
+export type NoteCitationEnvelope = z.infer<typeof noteCitationEnvelopeSchema>;
+export type NoteSavedFrom = z.infer<typeof noteSavedFromSchema>;
+export type CreateNoteRequest = z.infer<typeof createNoteRequestSchema>;
+/** Create payload as sent by a client, before `origin` is defaulted. */
+export type CreateNoteRequestInput = z.input<typeof createNoteRequestSchema>;
+export type UpdateNoteRequest = z.infer<typeof updateNoteRequestSchema>;
+export type Note = z.infer<typeof noteSchema>;
+
+/**
+ * Reads a note's persisted citations, tolerating rows that have none.
+ *
+ * @param value - Raw `citations` JSON column value
+ * @returns The citations, or an empty list when the column holds nothing usable
+ */
+export function readNoteCitations(
+    value: JsonReadValue | undefined,
+): NoteCitation[] {
+    if (value === null || value === undefined) {
+        return [];
+    }
+    const parsed = noteCitationEnvelopeSchema.safeParse(value);
+    return parsed.success ? parsed.data.items : [];
+}
+
+/**
+ * Reads a note's saved-from origin.
+ *
+ * @param value - Raw `savedFrom` JSON column value
+ * @returns The origin pointer, or `null` when the note was written by hand
+ */
+export function readNoteSavedFrom(
+    value: JsonReadValue | undefined,
+): NoteSavedFrom | null {
+    if (value === null || value === undefined) {
+        return null;
+    }
+    const parsed = noteSavedFromSchema.safeParse(value);
+    return parsed.success ? parsed.data : null;
 }

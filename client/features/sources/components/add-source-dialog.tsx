@@ -2,6 +2,7 @@
 
 import { useState, type DragEvent } from "react";
 import {
+    AudioLinesIcon,
     CheckCircle2Icon,
     FileTextIcon,
     Globe2Icon,
@@ -25,13 +26,16 @@ import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { useStudioCapabilities } from "@/features/studio";
 import {
     useCreateSource,
     useImportWebsiteSource,
     useImportYoutubeSource,
+    useUploadAudioSource,
     useUploadPdfSource,
 } from "../hooks/use-sources";
 import {
+    validateAudioFiles,
     validatePastedSource,
     validatePdfFiles,
     validateWebsiteSource,
@@ -50,7 +54,7 @@ type AddSourceDialogProps = {
     onSuccess?: (sourceId: string) => void;
 };
 
-type Picker = "files" | "website" | "youtube" | "text";
+type Picker = "files" | "audio" | "website" | "youtube" | "text";
 type QueueStatus = "waiting" | "submitting" | "queued" | "failed";
 type QueueBase = {
     id: string;
@@ -60,10 +64,16 @@ type QueueBase = {
     sourceId?: string;
 };
 type FileQueueItem = QueueBase & { kind: "file"; file: File };
+type AudioQueueItem = QueueBase & { kind: "audio"; file: File };
 type TextQueueItem = QueueBase & { kind: "text"; input: CreateSourceInput };
 type WebsiteQueueItem = QueueBase & { kind: "website"; input: ImportWebsiteInput };
 type YoutubeQueueItem = QueueBase & { kind: "youtube"; input: ImportYoutubeInput };
-type QueueItem = FileQueueItem | TextQueueItem | WebsiteQueueItem | YoutubeQueueItem;
+type QueueItem =
+    | FileQueueItem
+    | AudioQueueItem
+    | TextQueueItem
+    | WebsiteQueueItem
+    | YoutubeQueueItem;
 
 const PICKERS: Array<{
     id: Picker;
@@ -72,6 +82,7 @@ const PICKERS: Array<{
     icon: typeof UploadCloudIcon;
 }> = [
     { id: "files", label: "Upload files", description: "PDF, up to 10 MB", icon: UploadCloudIcon },
+    { id: "audio", label: "Audio", description: "Transcribed, up to 25 MB", icon: AudioLinesIcon },
     { id: "website", label: "Website", description: "Import an article", icon: Globe2Icon },
     { id: "youtube", label: "YouTube", description: "Use the transcript", icon: VideoIcon },
     { id: "text", label: "Paste text", description: "Text or Markdown", icon: FileTextIcon },
@@ -89,6 +100,9 @@ export function AddSourceDialog({
 }: AddSourceDialogProps) {
     const createSource = useCreateSource(workspaceId);
     const uploadPdf = useUploadPdfSource(workspaceId);
+    const uploadAudio = useUploadAudioSource(workspaceId);
+    const { data: capabilities } = useStudioCapabilities();
+    const audioSourcesAvailable = capabilities?.audioSources === true;
     const importWebsite = useImportWebsiteSource(workspaceId);
     const importYoutube = useImportYoutubeSource(workspaceId);
     const [picker, setPicker] = useState<Picker>("files");
@@ -133,9 +147,10 @@ export function AddSourceDialog({
         );
     }
 
-    function addFiles(files: File[]) {
+    function addFiles(files: File[], kind: "file" | "audio") {
         setFormError(null);
-        const validationError = validatePdfFiles(files);
+        const validationError =
+            kind === "audio" ? validateAudioFiles(files) : validatePdfFiles(files);
         if (validationError) {
             setFormError(validationError);
             return;
@@ -147,9 +162,9 @@ export function AddSourceDialog({
         }
         setItems((current) => [
             ...current,
-            ...files.map<FileQueueItem>((file) => ({
+            ...files.map<FileQueueItem | AudioQueueItem>((file) => ({
                 id: queueId(),
-                kind: "file",
+                kind,
                 file,
                 label: file.name,
                 status: "waiting",
@@ -157,9 +172,9 @@ export function AddSourceDialog({
         ]);
     }
 
-    function handleDrop(event: DragEvent<HTMLDivElement>) {
+    function handleDrop(event: DragEvent<HTMLDivElement>, kind: "file" | "audio") {
         event.preventDefault();
-        if (!isSubmitting) addFiles(Array.from(event.dataTransfer.files));
+        if (!isSubmitting) addFiles(Array.from(event.dataTransfer.files), kind);
     }
 
     function addUrlItem() {
@@ -211,6 +226,8 @@ export function AddSourceDialog({
         try {
             const source = item.kind === "file"
                 ? await uploadPdf.mutateAsync({ file: item.file, idempotencyKey: item.id })
+                : item.kind === "audio"
+                ? await uploadAudio.mutateAsync({ file: item.file, idempotencyKey: item.id })
                 : item.kind === "text"
                   ? await createSource.mutateAsync({ input: item.input, idempotencyKey: item.id })
                   : item.kind === "website"
@@ -241,17 +258,21 @@ export function AddSourceDialog({
                     </DialogDescription>
                 </DialogHeader>
 
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" aria-label="Choose a source type">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-5" aria-label="Choose a source type">
                     {PICKERS.map((option) => {
                         const Icon = option.icon;
+                        const unavailable =
+                            option.id === "audio" && !audioSourcesAvailable;
                         return (
                             <button
                                 key={option.id}
                                 type="button"
                                 aria-pressed={picker === option.id}
+                                disabled={unavailable}
                                 className={cn(
                                     "min-h-24 rounded-sm border bg-paper p-3 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
                                     picker === option.id && "border-primary bg-primary/5 shadow-[inset_3px_0_0_var(--primary)]",
+                                    unavailable && "cursor-not-allowed opacity-60",
                                 )}
                                 onClick={() => {
                                     setPicker(option.id);
@@ -260,7 +281,11 @@ export function AddSourceDialog({
                             >
                                 <Icon className="mb-2 size-5" />
                                 <span className="block text-sm font-semibold">{option.label}</span>
-                                <span className="mt-1 block text-xs text-muted-foreground">{option.description}</span>
+                                <span className="mt-1 block text-xs text-muted-foreground">
+                                    {unavailable
+                                        ? "Not available: no transcription provider is configured."
+                                        : option.description}
+                                </span>
                             </button>
                         );
                     })}
@@ -271,7 +296,7 @@ export function AddSourceDialog({
                         <div
                             className="grid min-h-36 place-items-center rounded-sm border border-dashed bg-paper px-4 text-center"
                             onDragOver={(event) => event.preventDefault()}
-                            onDrop={handleDrop}
+                            onDrop={(event) => handleDrop(event, "file")}
                         >
                             <div>
                                 <UploadCloudIcon className="mx-auto mb-2 size-7 text-primary" />
@@ -287,7 +312,34 @@ export function AddSourceDialog({
                                     multiple
                                     className="sr-only"
                                     disabled={isSubmitting}
-                                    onChange={(event) => addFiles(Array.from(event.target.files ?? []))}
+                                    onChange={(event) => addFiles(Array.from(event.target.files ?? []), "file")}
+                                />
+                            </div>
+                        </div>
+                    ) : picker === "audio" ? (
+                        <div
+                            className="grid min-h-36 place-items-center rounded-sm border border-dashed bg-paper px-4 text-center"
+                            onDragOver={(event) => event.preventDefault()}
+                            onDrop={(event) => handleDrop(event, "audio")}
+                        >
+                            <div>
+                                <AudioLinesIcon className="mx-auto mb-2 size-7 text-primary" />
+                                <p className="text-sm font-medium">Drop recordings here</p>
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                    MP3, M4A, WAV, WebM, OGG, or FLAC. 25 MB per file. Each is
+                                    transcribed with timestamps so answers can cite the moment.
+                                </p>
+                                <Button nativeButton={false} variant="outline" size="sm" className="mt-3" render={<Label htmlFor="source-audio-files" />}>
+                                    Upload audio
+                                </Button>
+                                <Input
+                                    id="source-audio-files"
+                                    type="file"
+                                    accept="audio/*"
+                                    multiple
+                                    className="sr-only"
+                                    disabled={isSubmitting || !audioSourcesAvailable}
+                                    onChange={(event) => addFiles(Array.from(event.target.files ?? []), "audio")}
                                 />
                             </div>
                         </div>
@@ -335,7 +387,7 @@ export function AddSourceDialog({
                                     <div className="min-w-0 flex-1">
                                         <p className="truncate text-sm font-medium">{item.label}</p>
                                         <p className={cn("text-xs text-muted-foreground", item.status === "failed" && "text-destructive")}>
-                                            {item.status === "waiting" ? "Waiting" : item.status === "submitting" ? item.kind === "file" ? "Uploading" : "Submitting" : item.status === "queued" ? "Queued for extraction" : item.error}
+                                            {item.status === "waiting" ? "Waiting" : item.status === "submitting" ? item.kind === "file" || item.kind === "audio" ? "Uploading" : "Submitting" : item.status === "queued" ? item.kind === "audio" ? "Queued for transcription" : "Queued for extraction" : item.error}
                                         </p>
                                     </div>
                                     {item.status === "failed" ? (

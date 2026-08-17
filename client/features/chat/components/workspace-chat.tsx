@@ -79,10 +79,45 @@ import {
     useSaveMessageAsOutput,
     useChatGuide,
 } from "../hooks/use-conversations";
+import { SaveExcerptButton, type NoteDraftCitation } from "@/features/notes";
 import { ChatMessageBody } from "./chat-message-body";
 import { CitationSources } from "./citation-sources";
 import { ChatComposer } from "./chat-composer";
 import type { ChatCitation } from "../lib/types";
+
+/**
+ * Turns an answer's citations into the locations a note can carry.
+ *
+ * Web results are dropped: a note cites places in the reader's own notebook, so
+ * only notebook sources survive the conversion.
+ */
+function noteCitationsFrom(
+    citations: ChatCitation[] | undefined,
+): NoteDraftCitation[] {
+    return (citations ?? []).flatMap((citation) =>
+        citation.kind === "source"
+            ? [
+                  {
+                      sourceId: citation.sourceId,
+                      title: citation.title,
+                      excerpt: citation.excerpt,
+                      ...(citation.page === undefined
+                          ? {}
+                          : { page: citation.page }),
+                      ...(citation.chunkId === undefined
+                          ? {}
+                          : { chunkId: citation.chunkId }),
+                      ...(citation.chunkIndex === undefined
+                          ? {}
+                          : { chunkIndex: citation.chunkIndex }),
+                      ...(citation.timestamp === undefined
+                          ? {}
+                          : { timestamp: citation.timestamp }),
+                  },
+              ]
+            : [],
+    );
+}
 import { workspaceRoutes } from "@/features/workspaces/lib/routes";
 import { useChatPreferences } from "../stores/chat-preferences";
 import { useNotebookUiStore } from "@/features/workspaces/stores/notebook-ui-store";
@@ -764,6 +799,20 @@ export function WorkspaceChat({
                                                                         >
                                                                             <ThumbsDownIcon />
                                                                         </Button>
+                                                                        {conversationId ? (
+                                                                            <SaveExcerptButton
+                                                                                compact
+                                                                                workspaceId={workspaceId}
+                                                                                content={getMessageText(message)}
+                                                                                origin="CHAT"
+                                                                                savedFrom={{
+                                                                                    kind: "chat",
+                                                                                    conversationId,
+                                                                                    messageId: message.id,
+                                                                                }}
+                                                                                citations={noteCitationsFrom(citations)}
+                                                                            />
+                                                                        ) : null}
                                                                         <Button
                                                                             variant="ghost"
                                                                             size="icon-sm"

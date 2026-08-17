@@ -4,6 +4,7 @@ import { useState } from "react";
 import { GraduationCapIcon, PlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { NotesList } from "@/features/notes";
 import { useOutputs } from "../hooks/use-outputs";
 import { OUTPUT_GROUP_LABELS } from "../lib/constants";
 import { groupOutputs } from "../lib/grouping";
@@ -90,6 +91,16 @@ export function StudioHub({ workspaceId }: StudioHubProps) {
                     ))}
                 </div>
             )}
+
+            <section aria-labelledby="studio-hub-notes" className="border-t pt-6">
+                <h3
+                    id="studio-hub-notes"
+                    className="mb-3 text-sm font-semibold tracking-wide text-muted-foreground uppercase"
+                >
+                    Notes
+                </h3>
+                <NotesList workspaceId={workspaceId} />
+            </section>
 
             <CreateOutputDialog
                 workspaceId={workspaceId}

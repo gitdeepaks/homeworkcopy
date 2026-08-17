@@ -15,6 +15,7 @@ import {
     listSources,
     reprocessSource,
     reprocessSources,
+    uploadAudioSource,
     uploadPdfSource,
 } from "../lib/api";
 import type {
@@ -118,6 +119,27 @@ export function useUploadPdfSource(workspaceId: string) {
             title?: string;
             idempotencyKey?: string;
         }) => uploadPdfSource(workspaceId, file, title, idempotencyKey),
+        onSuccess: () => {
+            void queryClient.invalidateQueries({
+                queryKey: sourceKeys(workspaceId).all,
+            });
+        },
+    });
+}
+
+export function useUploadAudioSource(workspaceId: string) {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: ({
+            file,
+            title,
+            idempotencyKey,
+        }: {
+            file: File;
+            title?: string;
+            idempotencyKey?: string;
+        }) => uploadAudioSource(workspaceId, file, title, idempotencyKey),
         onSuccess: () => {
             void queryClient.invalidateQueries({
                 queryKey: sourceKeys(workspaceId).all,

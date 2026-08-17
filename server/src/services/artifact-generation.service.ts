@@ -1,12 +1,8 @@
-import { generateText, Output } from "ai";
-import { openai } from "@ai-sdk/openai";
-import type { z } from "zod";
 import {
     briefingOutputContentSchema,
     faqOutputContentSchema,
     flashcardsOutputContentSchema,
     mindmapOutputContentSchema,
-    OUTPUT_MAX_GENERATION_ATTEMPTS,
     quizOutputContentSchema,
     reportOutputContentSchema,
     studyGuideOutputContentSchema,
@@ -14,25 +10,26 @@ import {
     takeawaysOutputContentSchema,
     timelineOutputContentSchema,
     type OutputContent,
-    type OutputFailureStage,
     type OutputGenerationOptions,
     type OutputLength,
     type OutputSourceLabel,
     type OutputType,
 } from "@homeworkcopy/contracts";
-import { CHAT_MODEL } from "../lib/ai-config.js";
-import { logger } from "../lib/logger.js";
-import { withTimeout } from "../lib/timeout.js";
+import { generateStructured } from "../lib/structured-generation.js";
 import type { SourceRecord } from "../repositories/source.repository.js";
 import { OutputGenerationError } from "../types/app-error.js";
+import {
+    generateDataTableContent,
+    generateSlidesContent,
+} from "./structured-output.service.js";
 
 const MAX_CONTEXT_CHARS = 120_000;
 
-/** Upper bound for a single structured generation call. */
-export const OUTPUT_GENERATION_TIMEOUT_MS = 120_000;
-
-/** Provider used for every Studio output today. */
-export const OUTPUT_PROVIDER = "openai";
+export {
+    generateStructured,
+    OUTPUT_GENERATION_TIMEOUT_MS,
+    OUTPUT_PROVIDER,
+} from "../lib/structured-generation.js";
 
 const LENGTH_GUIDANCE: Record<OutputLength, string> = {
     short: "Keep the output tight: cover only the highest-value material and prefer the lower end of any allowed item count.",
@@ -61,6 +58,11 @@ const OUTPUT_INSTRUCTIONS: Record<OutputType, string> = {
         "Write a briefing document: a headline, an executive summary, key points, decisions taken, risks or open questions, and recommended next steps. Leave a list empty rather than inventing entries.",
     AUDIO_OVERVIEW:
         "Write a spoken script that explains the material out loud. Audio Overviews are produced by their own pipeline in audio-overview.service.ts.",
+    SLIDES: "Build a presentation outline. Slide decks are produced by their own pipeline in structured-output.service.ts.",
+    DATA_TABLE:
+        "Extract comparable facts into tables. Data tables are produced by their own pipeline in structured-output.service.ts.",
+    VIDEO_EXPLAINER:
+        "Write a narrated storyboard. Video explainers are produced by their own pipeline in video-explainer.service.ts.",
 };
 
 /**
@@ -174,92 +176,6 @@ function buildSystemPrompt(
     ]
         .filter((line): line is string => line !== null)
         .join("\n");
-}
-
-function describeIssues(error: z.ZodError): string {
-    return error.issues
-        .slice(0, 5)
-        .map((issue) => {
-            const path = issue.path.join(".");
-            return path ? `${path}: ${issue.message}` : issue.message;
-        })
-        .join("; ");
-}
-
-/**
- * Generates schema-valid JSON, re-prompting the model with the validation
- * failure before giving up.
- *
- * @param type - Output type being generated (used for logs only)
- * @param schema - Contract schema the response must satisfy
- * @param system - System prompt describing the task
- * @param prompt - User prompt carrying the source material
- * @param failureStage - Pipeline stage reported when every attempt fails
- * @returns Validated data plus the number of repair round-trips that were needed
- * @throws {OutputGenerationError} When no attempt produced schema-valid output
- */
-export async function generateStructured<T>(
-    type: OutputType,
-    schema: z.ZodType<T>,
-    system: string,
-    prompt: string,
-    failureStage: OutputFailureStage = "VALIDATION",
-): Promise<{ data: T; repairAttempts: number }> {
-    let lastFailure = "";
-
-    for (
-        let repairAttempts = 0;
-        repairAttempts < OUTPUT_MAX_GENERATION_ATTEMPTS;
-        repairAttempts += 1
-    ) {
-        const attemptPrompt = lastFailure
-            ? [
-                  prompt,
-                  "",
-                  `Your previous response was rejected because it did not satisfy the schema: ${lastFailure}`,
-                  "Return corrected JSON that satisfies the schema exactly.",
-              ].join("\n")
-            : prompt;
-
-        try {
-            const result = await withTimeout(
-                "Output generation",
-                OUTPUT_GENERATION_TIMEOUT_MS,
-                generateText({
-                    model: openai(CHAT_MODEL),
-                    system,
-                    output: Output.object({ schema }),
-                    prompt: attemptPrompt,
-                }),
-            );
-
-            const validated = schema.safeParse(result.output);
-            if (validated.success) {
-                return { data: validated.data, repairAttempts };
-            }
-
-            lastFailure = describeIssues(validated.error);
-            logger.warn(
-                { outputType: type, repairAttempts },
-                "Studio output failed schema validation",
-            );
-        } catch (error) {
-            lastFailure =
-                error instanceof Error
-                    ? error.message
-                    : "Output generation failed";
-            logger.warn(
-                { outputType: type, repairAttempts },
-                "Studio output generation attempt failed",
-            );
-        }
-    }
-
-    throw new OutputGenerationError(
-        failureStage,
-        "INVALID_MODEL_OUTPUT",
-        `The model did not return valid ${type.toLowerCase().replace(/_/g, " ")} data after ${OUTPUT_MAX_GENERATION_ATTEMPTS} attempts.`,
-    );
 }
 
 /**
@@ -402,12 +318,41 @@ export async function generateOutputContent(
                 repairAttempts: result.repairAttempts,
             };
         }
+        case "SLIDES": {
+            const result = await generateSlidesContent(
+                sourceText,
+                options,
+                sourceLabels,
+            );
+            return {
+                content: { type, data: result.content },
+                repairAttempts: result.repairAttempts,
+            };
+        }
+        case "DATA_TABLE": {
+            const result = await generateDataTableContent(
+                sourceText,
+                options,
+                sourceLabels,
+            );
+            return {
+                content: { type, data: result.content },
+                repairAttempts: result.repairAttempts,
+            };
+        }
         case "AUDIO_OVERVIEW":
             // Audio runs a scripting/synthesis/assembly pipeline of its own.
             throw new OutputGenerationError(
                 "GENERATION",
                 "UNSUPPORTED_OUTPUT_TYPE",
                 "Audio Overviews are generated by the audio pipeline.",
+            );
+        case "VIDEO_EXPLAINER":
+            // Video explainers run a storyboard/narration pipeline of their own.
+            throw new OutputGenerationError(
+                "GENERATION",
+                "UNSUPPORTED_OUTPUT_TYPE",
+                "Video explainers are generated by the video pipeline.",
             );
     }
 }

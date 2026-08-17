@@ -22,8 +22,11 @@ import {
     type StoredSourceMetadata,
     type TranscriptSegment,
 } from "@homeworkcopy/contracts";
+import { createSignedSourceAudioUrl } from "../lib/audio-storage.js";
 import { chunkPages, chunkText } from "../lib/chunking.js";
 import { embedTexts } from "../lib/openai.js";
+import { getSpeechToTextProvider } from "../lib/stt/index.js";
+import { ValidationError } from "../types/app-error.js";
 import { extractPdfFromCloudinary } from "../lib/pdf.js";
 import { scrapeWebsite } from "../lib/firecrawl.js";
 import { fetchYoutubeTranscript } from "../lib/youtube.js";
@@ -56,17 +59,97 @@ function parseMetadata(value: SourceRecord["metadata"]): StoredSourceMetadata {
 }
 
 /**
+ * Reads a stored recording back and transcribes it.
+ *
+ * The file is fetched through a freshly minted signed URL rather than a URL
+ * persisted at upload time, so a stored signature can never outlive its
+ * validity.
+ *
+ * @param source - AUDIO source being processed
+ * @param metadata - Its parsed metadata, carrying the storage coordinates
+ * @returns Transcript text, timestamped segments, and recording facts
+ * @throws {Error} When storage, the file, or the provider is unusable
+ */
+async function transcribeStoredAudio(
+    source: SourceRecord,
+    metadata: StoredSourceMetadata,
+): Promise<{
+    text: string;
+    segments: TranscriptSegment[];
+    durationMs: number | null;
+    language: string | null;
+    provider: string;
+}> {
+    const provider = getSpeechToTextProvider();
+    if (!provider) {
+        throw new Error("No transcription provider is configured");
+    }
+    if (!metadata.publicId) {
+        throw new Error("Audio source is missing its storage metadata");
+    }
+
+    const fileName = metadata.fileName ?? `${source.id}.mp3`;
+    // The stored format comes from the file's own bytes; a filename extension
+    // can disagree with them and would sign a URL for an object that is not there.
+    const format = metadata.storageFormat ?? "mp3";
+    const url = createSignedSourceAudioUrl(metadata.publicId, format);
+    const response = await fetch(url);
+    if (!response.ok) {
+        throw new Error(
+            `Stored recording could not be read (${response.status})`,
+        );
+    }
+
+    const audio = await response.arrayBuffer();
+    if (audio.byteLength > provider.maxInputBytes) {
+        throw new ValidationError(
+            "The recording is too large for the transcription provider",
+        );
+    }
+
+    const transcript = await provider.transcribe({
+        audio,
+        fileName,
+        mimeType: metadata.mimeType ?? "audio/mpeg",
+    });
+
+    if (!transcript.text) {
+        throw new ValidationError(
+            "No speech could be transcribed from this recording",
+        );
+    }
+
+    return { ...transcript, provider: provider.id };
+}
+
+/** Facts learned about a recording while transcribing it. */
+type ExtractedAudioFacts = {
+    durationMs: number | null;
+    language: string | null;
+    provider: string;
+};
+
+type ExtractedSourceText = {
+    text: string;
+    pageCount: number | undefined;
+    pages: string[] | undefined;
+    transcriptSegments: TranscriptSegment[] | undefined;
+    audio: ExtractedAudioFacts | undefined;
+};
+
+/**
  * Reads extractable text from a source record.
  *
- * **Two paths:**
+ * **Paths:**
  * 1. **Text already in DB** — returns `source.content` (TEXT, URL scrape, YouTube transcript, etc.)
  * 2. **PDF** — downloads from Cloudinary and runs PDF text extraction
+ * 3. **AUDIO** — reads the stored recording back and transcribes it
  *
- * @throws If PDF is missing `fileUrl` or source has no content at all
- *
- *
+ * @throws If a stored file is unreachable or the source has no extractable content
  */
-async function extractSourceText(source: SourceRecord) {
+async function extractSourceText(
+    source: SourceRecord,
+): Promise<ExtractedSourceText> {
     const text = source.content?.trim();
     if (source.type === "PDF") {
         const metadata = parseMetadata(source.metadata);
@@ -74,13 +157,15 @@ async function extractSourceText(source: SourceRecord) {
             const extracted = await extractPdfFromCloudinary({
                 fileUrl: metadata.fileUrl,
                 publicId: metadata.publicId,
-                resourceType: metadata.resourceType ?? "image",
+                // A PDF is never stored as a video asset, unlike an audio source.
+                resourceType: metadata.resourceType === "raw" ? "raw" : "image",
             });
             return {
                 text: extracted.text,
                 pageCount: extracted.pageCount,
                 pages: extracted.pages,
                 transcriptSegments: undefined,
+                audio: undefined,
             };
         }
         if (!text) throw new Error("PDF source is missing fileUrl metadata");
@@ -89,6 +174,38 @@ async function extractSourceText(source: SourceRecord) {
             pageCount: metadata.pageCount,
             pages: undefined,
             transcriptSegments: undefined,
+            audio: undefined,
+        };
+    }
+
+    if (source.type === "AUDIO") {
+        const metadata = parseMetadata(source.metadata);
+        // A previous attempt may already have paid for the transcript.
+        if (text && metadata.transcriptSegments?.length) {
+            return {
+                text,
+                pageCount: undefined,
+                pages: undefined,
+                transcriptSegments: metadata.transcriptSegments,
+                audio: undefined,
+            };
+        }
+
+        const transcribed = await transcribeStoredAudio(source, metadata);
+        enforceExtractedContentLimits(
+            transcribed.text,
+            transcribed.segments.length,
+        );
+        return {
+            text: transcribed.text,
+            pageCount: undefined,
+            pages: undefined,
+            transcriptSegments: transcribed.segments,
+            audio: {
+                durationMs: transcribed.durationMs,
+                language: transcribed.language,
+                provider: transcribed.provider,
+            },
         };
     }
 
@@ -100,6 +217,7 @@ async function extractSourceText(source: SourceRecord) {
             pageCount: undefined,
             pages: undefined,
             transcriptSegments: undefined,
+            audio: undefined,
         };
     }
 
@@ -111,6 +229,7 @@ async function extractSourceText(source: SourceRecord) {
             pageCount: undefined,
             pages: undefined,
             transcriptSegments: transcript.segments,
+            audio: undefined,
         };
     }
 
@@ -122,6 +241,7 @@ async function extractSourceText(source: SourceRecord) {
             pages: undefined,
             transcriptSegments:
                 source.type === "YOUTUBE" ? metadata.transcriptSegments : undefined,
+            audio: undefined,
         };
     }
 
@@ -208,6 +328,14 @@ export async function extractSourceContent(sourceId: string, processingVersion: 
         ...metadata,
         pageCount: extracted.pageCount ?? metadata.pageCount,
         transcriptSegments: extracted.transcriptSegments ?? metadata.transcriptSegments,
+        ...(extracted.audio
+            ? {
+                  durationMs: extracted.audio.durationMs ?? metadata.durationMs,
+                  detectedLanguage:
+                      extracted.audio.language ?? metadata.detectedLanguage,
+                  transcriptProvider: extracted.audio.provider,
+              }
+            : {}),
     };
     await updateSourceForProcessingVersion(sourceId, processingVersion, {
         content: extracted.text,
