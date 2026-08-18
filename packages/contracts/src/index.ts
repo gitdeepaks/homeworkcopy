@@ -1704,3 +1704,512 @@ export function readNoteSavedFrom(
     const parsed = noteSavedFromSchema.safeParse(value);
     return parsed.success ? parsed.data : null;
 }
+
+/* -------------------------------------------------------------------------- */
+/*                        Collaboration and sharing                           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A member's effective role in a notebook.
+ *
+ * `OWNER` is never stored on a membership row. The notebook's own `userId`
+ * column is the single record of who owns it, and the access resolver reports
+ * `OWNER` for that user, so ownership can never disagree with itself. Rows in
+ * the membership table are therefore always {@link NotebookMemberRole}.
+ */
+export const notebookRoleSchema = z.enum(["OWNER", "EDITOR", "VIEWER"]);
+
+/** The roles a collaborator can actually be granted. */
+export const notebookMemberRoleSchema = z.enum(["EDITOR", "VIEWER"]);
+
+export type NotebookRole = z.infer<typeof notebookRoleSchema>;
+export type NotebookMemberRole = z.infer<typeof notebookMemberRoleSchema>;
+
+/**
+ * Every action a notebook resource can require.
+ *
+ * Permissions are named `resource:verb` and are the only vocabulary the server's
+ * authorization layer speaks. A route never asks "is this the owner?" — it names
+ * the permission it needs, and {@link ROLE_PERMISSIONS} decides.
+ */
+export const notebookPermissionSchema = z.enum([
+    "notebook:read",
+    "notebook:update",
+    "notebook:delete",
+    "notebook:transfer",
+    "source:create",
+    "source:delete",
+    "source:reprocess",
+    "chat:write",
+    "conversation:manage",
+    "output:create",
+    "output:update",
+    "output:delete",
+    "output:download",
+    "note:create",
+    "note:update",
+    "note:delete",
+    "member:read",
+    "member:manage",
+    "share:manage",
+    "audit:read",
+]);
+
+export type NotebookPermission = z.infer<typeof notebookPermissionSchema>;
+
+/**
+ * Everything a reader may do without changing shared notebook state.
+ *
+ * Reading the member list is included on purpose: someone who can see a shared
+ * notebook should be able to see who else can.
+ */
+const VIEWER_PERMISSIONS = [
+    "notebook:read",
+    "member:read",
+] as const satisfies readonly NotebookPermission[];
+
+/**
+ * Everything a collaborator may do to notebook content.
+ *
+ * Chat is an editor capability rather than a viewer one because conversations
+ * are shared notebook state with no per-member isolation: a message written by
+ * one member is history for all of them. Giving read-only access the ability to
+ * write into that history — and to spend model budget doing it — would make
+ * "viewer" mean something it does not say. Per-member private conversations
+ * would be the way to widen this, and that is a schema change, not a matrix
+ * change.
+ */
+const EDITOR_PERMISSIONS = [
+    ...VIEWER_PERMISSIONS,
+    "source:create",
+    "source:delete",
+    "source:reprocess",
+    "chat:write",
+    "conversation:manage",
+    "output:create",
+    "output:update",
+    "output:delete",
+    "output:download",
+    "note:create",
+    "note:update",
+    "note:delete",
+] as const satisfies readonly NotebookPermission[];
+
+/**
+ * Everything the owner may do.
+ *
+ * Membership, sharing, transfer, deletion, and the audit trail stay with the
+ * owner: they are the operations that decide who else can reach the notebook at
+ * all, so delegating them would let an editor widen their own access.
+ */
+const OWNER_PERMISSIONS = [
+    ...EDITOR_PERMISSIONS,
+    "notebook:update",
+    "notebook:delete",
+    "notebook:transfer",
+    "member:manage",
+    "share:manage",
+    "audit:read",
+] as const satisfies readonly NotebookPermission[];
+
+/** The role matrix. Every authorization decision in the product reads this. */
+export const ROLE_PERMISSIONS: Readonly<
+    Record<NotebookRole, ReadonlySet<NotebookPermission>>
+> = {
+    OWNER: new Set<NotebookPermission>(OWNER_PERMISSIONS),
+    EDITOR: new Set<NotebookPermission>(EDITOR_PERMISSIONS),
+    VIEWER: new Set<NotebookPermission>(VIEWER_PERMISSIONS),
+};
+
+/**
+ * Decides whether a role may perform an action.
+ *
+ * @param role - The member's effective role in the notebook
+ * @param permission - The action being attempted
+ * @returns `true` when the role grants the permission
+ */
+export function hasNotebookPermission(
+    role: NotebookRole,
+    permission: NotebookPermission,
+): boolean {
+    return ROLE_PERMISSIONS[role].has(permission);
+}
+
+/**
+ * Lists a role's permissions, sorted for stable comparison and display.
+ *
+ * @param role - The role to describe
+ * @returns Every permission the role grants
+ */
+export function permissionsForRole(
+    role: NotebookRole,
+): NotebookPermission[] {
+    return [...ROLE_PERMISSIONS[role]].sort();
+}
+
+/** Whether a notebook is private to its owner or reachable by other people. */
+export const notebookAudienceSchema = z.enum(["private", "shared"]);
+
+export type NotebookAudience = z.infer<typeof notebookAudienceSchema>;
+
+/** Which notebooks a dashboard request wants: the reader's own, or others'. */
+export const notebookScopeSchema = z.enum(["mine", "shared"]);
+
+export type NotebookScope = z.infer<typeof notebookScopeSchema>;
+
+export const NOTEBOOK_MEMBER_MAX = 25;
+export const NOTEBOOK_PENDING_INVITATION_MAX = 25;
+export const INVITATION_TTL_DAYS = 14;
+export const SHARE_LINK_MAX_TTL_DAYS = 90;
+
+/**
+ * Byte length of the random part of an invitation or share-link token.
+ *
+ * 32 bytes is 256 bits of entropy, which keeps a link unguessable even though
+ * possessing it is, by design, enough to act on it.
+ */
+export const SHARE_TOKEN_BYTES = 32;
+
+/**
+ * Whether a share link is reachable by search engines and link unfurlers.
+ *
+ * Deliberately `false`. A share link is a bearer capability: anyone holding it
+ * can join the notebook, so it must never be discoverable by anyone who was not
+ * handed it. Pages that accept a token send `X-Robots-Tag: noindex, nofollow`
+ * and carry the matching `robots` metadata.
+ */
+export const SHARE_LINKS_ARE_INDEXABLE = false;
+
+const emailSchema = z
+    .string()
+    .trim()
+    .toLowerCase()
+    .pipe(z.email("Enter a valid email address").max(320));
+
+/**
+ * A token as it appears in a URL.
+ *
+ * Only the shape is checked here. Whether a token is real is decided by looking
+ * up its hash, never by inspecting the string.
+ */
+export const shareTokenSchema = z
+    .string()
+    .trim()
+    .regex(/^[A-Za-z0-9_-]{32,128}$/, "That link is not valid");
+
+/** Lifecycle of an emailed invitation. */
+export const invitationStatusSchema = z.enum([
+    "PENDING",
+    "ACCEPTED",
+    "REVOKED",
+]);
+
+export type InvitationStatus = z.infer<typeof invitationStatusSchema>;
+
+/**
+ * Why an invitation or share link could not be accepted.
+ *
+ * The client renders one of these; it never sees whether the token simply does
+ * not exist, so a wrong token and a revoked one are indistinguishable to
+ * someone probing for valid links.
+ */
+export const shareRejectionReasonSchema = z.enum([
+    "INVALID",
+    "EXPIRED",
+    "REVOKED",
+    "WRONG_ACCOUNT",
+    "ALREADY_MEMBER",
+    "NOTEBOOK_FULL",
+]);
+
+export type ShareRejectionReason = z.infer<typeof shareRejectionReasonSchema>;
+
+/** A person who can reach a notebook, as shown in the share dialog. */
+export const notebookMemberSchema = z.object({
+    userId: z.string().min(1),
+    name: z.string(),
+    email: z.email(),
+    image: z.string().nullable(),
+    role: notebookRoleSchema,
+    /** When the owner created the notebook, or when the member joined it. */
+    joinedAt: z.iso.datetime(),
+    /** How the member arrived: `null` for the owner. */
+    invitedByUserId: z.string().min(1).nullable(),
+});
+
+export type NotebookMember = z.infer<typeof notebookMemberSchema>;
+
+/**
+ * An outstanding invitation.
+ *
+ * The token is absent: it is shown once at creation and stored only as a hash,
+ * so re-opening the share dialog cannot leak a live capability.
+ */
+export const notebookInvitationSchema = z.object({
+    id: z.string().min(1),
+    email: z.email(),
+    role: notebookMemberRoleSchema,
+    status: invitationStatusSchema,
+    invitedByUserId: z.string().min(1),
+    expiresAt: z.iso.datetime(),
+    createdAt: z.iso.datetime(),
+});
+
+export type NotebookInvitation = z.infer<typeof notebookInvitationSchema>;
+
+/** An invitation plus the one-time link, returned only from the create call. */
+export const createdInvitationSchema = z.object({
+    invitation: notebookInvitationSchema,
+    /**
+     * The full acceptance URL, returned exactly once.
+     *
+     * There is no mail provider in this deployment, so the inviter delivers the
+     * link themselves. Re-opening the dialog will not show it again; the fix for
+     * a lost link is to revoke and re-invite.
+     */
+    inviteUrl: z.url(),
+});
+
+export type CreatedInvitation = z.infer<typeof createdInvitationSchema>;
+
+/**
+ * The notebook's link-sharing state.
+ *
+ * `null` means link sharing is off. A link always grants `VIEWER`: an editor
+ * capability that travels by forwarding is not something a notebook owner can
+ * meaningfully consent to.
+ */
+export const shareLinkSchema = z.object({
+    id: z.string().min(1),
+    role: z.literal("VIEWER"),
+    expiresAt: z.iso.datetime(),
+    createdAt: z.iso.datetime(),
+    createdByUserId: z.string().min(1),
+    lastJoinedAt: z.iso.datetime().nullable(),
+    joinCount: z.number().int().nonnegative(),
+});
+
+export type ShareLink = z.infer<typeof shareLinkSchema>;
+
+/** A share link plus its one-time URL, returned only when it is minted. */
+export const createdShareLinkSchema = z.object({
+    shareLink: shareLinkSchema,
+    shareUrl: z.url(),
+});
+
+export type CreatedShareLink = z.infer<typeof createdShareLinkSchema>;
+
+/** Everything the share dialog needs in one request. */
+export const notebookSharingSchema = z.object({
+    version: z.literal(1),
+    workspaceId: z.string().min(1),
+    /**
+     * The reading user's own id.
+     *
+     * Sent because the client authenticates with Clerk but the notebook's own
+     * records key on the local user id; without this the dialog could not tell
+     * which row is the reader's own.
+     */
+    viewerUserId: z.string().min(1),
+    /** The reader's own role, so the dialog can disable what they cannot do. */
+    role: notebookRoleSchema,
+    audience: notebookAudienceSchema,
+    members: z.array(notebookMemberSchema),
+    invitations: z.array(notebookInvitationSchema),
+    shareLink: shareLinkSchema.nullable(),
+});
+
+export type NotebookSharing = z.infer<typeof notebookSharingSchema>;
+
+export const inviteMemberRequestSchema = z.object({
+    email: emailSchema,
+    role: notebookMemberRoleSchema,
+});
+
+export const updateMemberRoleRequestSchema = z.object({
+    role: notebookMemberRoleSchema,
+});
+
+export const createShareLinkRequestSchema = z.object({
+    expiresInDays: z
+        .number()
+        .int()
+        .positive()
+        .max(SHARE_LINK_MAX_TTL_DAYS)
+        .default(SHARE_LINK_MAX_TTL_DAYS),
+});
+
+export const transferOwnershipRequestSchema = z.object({
+    /** The member to hand the notebook to. They must already be a member. */
+    userId: z.string().min(1),
+});
+
+export type InviteMemberRequest = z.infer<typeof inviteMemberRequestSchema>;
+export type UpdateMemberRoleRequest = z.infer<
+    typeof updateMemberRoleRequestSchema
+>;
+export type CreateShareLinkRequest = z.infer<
+    typeof createShareLinkRequestSchema
+>;
+export type CreateShareLinkRequestInput = z.input<
+    typeof createShareLinkRequestSchema
+>;
+export type TransferOwnershipRequest = z.infer<
+    typeof transferOwnershipRequestSchema
+>;
+
+/** What a client learns after redeeming an invitation or share link. */
+export const acceptShareResponseSchema = z.object({
+    workspaceId: z.string().min(1),
+    workspaceTitle: z.string().min(1),
+    role: notebookMemberRoleSchema,
+});
+
+export type AcceptShareResponse = z.infer<typeof acceptShareResponseSchema>;
+
+/** A notebook as listed on the dashboard, in either scope. */
+export const notebookSummarySchema = z.object({
+    id: z.string().min(1),
+    title: z.string().min(1),
+    description: z.string().nullable(),
+    icon: z.string().nullable(),
+    defaultModel: z.string().min(1),
+    createdAt: z.iso.datetime(),
+    updatedAt: z.iso.datetime(),
+    /** The reading user's role, so cards can gate their own actions. */
+    role: notebookRoleSchema,
+    audience: notebookAudienceSchema,
+    /** People with access, including the owner. */
+    memberCount: z.number().int().positive(),
+    /** The owner's display name, shown on shared notebooks. */
+    ownerName: z.string().min(1),
+});
+
+export type NotebookSummary = z.infer<typeof notebookSummarySchema>;
+
+/* ------------------------------ Audit trail ------------------------------- */
+
+/**
+ * Things worth being able to answer "who did that, and when?" about.
+ *
+ * The list is deliberately limited to membership, sharing, and irreversible
+ * operations. Reads are not audited — recording every page view of a shared
+ * notebook would bury the events that matter in noise.
+ */
+export const auditEventTypeSchema = z.enum([
+    "MEMBER_INVITED",
+    "INVITATION_ACCEPTED",
+    "INVITATION_REVOKED",
+    "MEMBER_ROLE_CHANGED",
+    "MEMBER_REMOVED",
+    "MEMBER_LEFT",
+    "OWNERSHIP_TRANSFERRED",
+    "SHARE_LINK_CREATED",
+    "SHARE_LINK_REVOKED",
+    "SHARE_LINK_JOINED",
+    "NOTEBOOK_DELETED",
+    "SOURCE_DELETED",
+    "CONVERSATION_DELETED",
+    "OUTPUT_DELETED",
+    "NOTE_DELETED",
+    "OUTPUT_MEDIA_EXPORTED",
+]);
+
+export type AuditEventType = z.infer<typeof auditEventTypeSchema>;
+
+/**
+ * Structured context for an audit event.
+ *
+ * Constrained to identifiers, roles, counts, and titles on purpose: an audit row
+ * is retained far longer than the resource it describes, so it must never carry
+ * source text, chat content, or anything a deletion request would have to chase.
+ */
+export const auditEventContextSchema = z.object({
+    targetUserId: z.string().min(1).optional(),
+    targetEmail: z.email().optional(),
+    targetResourceId: z.string().min(1).optional(),
+    /** Resource title, kept short so the trail stays readable, not archival. */
+    targetTitle: z.string().max(200).optional(),
+    fromRole: notebookRoleSchema.optional(),
+    toRole: notebookRoleSchema.optional(),
+    count: z.number().int().nonnegative().optional(),
+});
+
+export type AuditEventContext = z.infer<typeof auditEventContextSchema>;
+
+export const auditEventSchema = z.object({
+    id: z.string().min(1),
+    workspaceId: z.string().min(1),
+    type: auditEventTypeSchema,
+    /** `null` once the acting user's account is deleted. */
+    actorUserId: z.string().min(1).nullable(),
+    actorName: z.string().nullable(),
+    context: auditEventContextSchema,
+    createdAt: z.iso.datetime(),
+});
+
+export type AuditEvent = z.infer<typeof auditEventSchema>;
+
+/**
+ * Reads an audit row's persisted context, tolerating rows written by an older
+ * build than the one reading them.
+ *
+ * @param value - Raw `context` JSON column value
+ * @returns The context, or an empty context when the column holds nothing usable
+ */
+export function readAuditEventContext(
+    value: JsonReadValue | undefined,
+): AuditEventContext {
+    if (value === null || value === undefined) {
+        return {};
+    }
+    const parsed = auditEventContextSchema.safeParse(value);
+    return parsed.success ? parsed.data : {};
+}
+
+/**
+ * Whether an invitation can still be redeemed.
+ *
+ * @param invitation - Status and expiry of the invitation
+ * @param now - Current time
+ * @returns The reason it cannot be redeemed, or `null` when it can
+ */
+export function invitationRejectionReason(
+    invitation: { status: InvitationStatus; expiresAt: Date },
+    now: Date,
+): Extract<ShareRejectionReason, "EXPIRED" | "REVOKED" | "INVALID"> | null {
+    if (invitation.status === "REVOKED") return "REVOKED";
+    if (invitation.status === "ACCEPTED") return "INVALID";
+    if (invitation.expiresAt.getTime() <= now.getTime()) return "EXPIRED";
+    return null;
+}
+
+/**
+ * Whether a share link can still be redeemed.
+ *
+ * @param shareLink - Revocation and expiry state of the link
+ * @param now - Current time
+ * @returns The reason it cannot be redeemed, or `null` when it can
+ */
+export function shareLinkRejectionReason(
+    shareLink: { revokedAt: Date | null; expiresAt: Date },
+    now: Date,
+): Extract<ShareRejectionReason, "EXPIRED" | "REVOKED"> | null {
+    if (shareLink.revokedAt !== null) return "REVOKED";
+    if (shareLink.expiresAt.getTime() <= now.getTime()) return "EXPIRED";
+    return null;
+}
+
+/** Human-readable copy for each rejection, shared by every redemption surface. */
+export const SHARE_REJECTION_MESSAGES: Readonly<
+    Record<ShareRejectionReason, string>
+> = {
+    INVALID: "This link is no longer valid. Ask the notebook owner for a new one.",
+    EXPIRED: "This link has expired. Ask the notebook owner for a new one.",
+    REVOKED: "This link was revoked. Ask the notebook owner for a new one.",
+    WRONG_ACCOUNT:
+        "This invitation was sent to a different email address. Sign in with that account to accept it.",
+    ALREADY_MEMBER: "You already have access to this notebook.",
+    NOTEBOOK_FULL:
+        "This notebook has reached its member limit. Ask the owner to remove someone first.",
+};

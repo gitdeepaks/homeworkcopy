@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { NotebookScope } from "@homeworkcopy/contracts";
 import { ApiError } from "@/shared/lib/api";
 import {
     createWorkspace,
@@ -12,14 +13,21 @@ import {
 import type { CreateWorkspaceInput, UpdateWorkspaceInput } from "../lib/types";
 
 export const workspaceKeys = {
+    /** Everything list-shaped, so one invalidation refreshes both tabs. */
     all: ["workspaces"] as const,
+    list: (scope: NotebookScope) => ["workspaces", "list", scope] as const,
     detail: (id: string) => ["workspaces", id] as const,
 };
 
-export function useWorkspaces() {
+/**
+ * Lists the notebooks in one dashboard tab.
+ *
+ * @param scope - `mine` for owned notebooks, `shared` for ones shared with you
+ */
+export function useWorkspaces(scope: NotebookScope = "mine") {
     return useQuery({
-        queryKey: workspaceKeys.all,
-        queryFn: listWorkspaces,
+        queryKey: workspaceKeys.list(scope),
+        queryFn: () => listWorkspaces(scope),
     });
 }
 
@@ -27,6 +35,8 @@ export function useWorkspace(id: string) {
     return useQuery({
         queryKey: workspaceKeys.detail(id),
         queryFn: () => getWorkspace(id),
+        // A notebook that is gone, or that this reader was just removed from,
+        // answers 404 and will keep doing so. Retrying only delays the message.
         retry: (_, error) =>
             !(error instanceof ApiError && error.status === 404),
     });

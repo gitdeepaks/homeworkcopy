@@ -34,8 +34,12 @@ import {
 } from "../repositories/note.repository.js";
 import { findSourcesByIdsAndWorkspaceId } from "../repositories/source.repository.js";
 import { NotFoundError, ValidationError } from "../types/app-error.js";
+import { recordAuditEvent } from "./audit.service.js";
 import { toPrismaJson } from "../utils/prisma-json.js";
-import { getWorkspaceByIdForUser } from "./workspace.service.js";
+import {
+    authorizeNotebook,
+    type Actor,
+} from "./notebook-access.service.js";
 
 /**
  * Derives a title from the note body when the reader did not supply one.
@@ -166,7 +170,7 @@ export async function listNotesForWorkspace(
     workspaceId: string,
     userId: string,
 ): Promise<NoteRecord[]> {
-    await getWorkspaceByIdForUser(workspaceId, userId);
+    await authorizeNotebook(workspaceId, userId, "notebook:read");
     return findNotesByWorkspaceId(workspaceId);
 }
 
@@ -184,7 +188,7 @@ export async function getNoteForWorkspace(
     noteId: string,
     userId: string,
 ): Promise<NoteRecord> {
-    await getWorkspaceByIdForUser(workspaceId, userId);
+    await authorizeNotebook(workspaceId, userId, "notebook:read");
 
     const note = await findNoteByIdAndWorkspaceId(noteId, workspaceId);
     if (!note) {
@@ -208,7 +212,7 @@ export async function createNoteForWorkspace(
     userId: string,
     input: CreateNoteRequest,
 ): Promise<NoteRecord> {
-    await getWorkspaceByIdForUser(workspaceId, userId);
+    await authorizeNotebook(workspaceId, userId, "note:create");
 
     if (input.savedFrom) {
         await assertSavedFromOwned(workspaceId, input.savedFrom);
@@ -251,6 +255,7 @@ export async function updateNoteForWorkspace(
     userId: string,
     input: UpdateNoteRequest,
 ): Promise<NoteRecord> {
+    await authorizeNotebook(workspaceId, userId, "note:update");
     await getNoteForWorkspace(workspaceId, noteId, userId);
 
     if (input.citations === undefined) {
@@ -288,9 +293,18 @@ export async function updateNoteForWorkspace(
 export async function deleteNoteForWorkspace(
     workspaceId: string,
     noteId: string,
-    userId: string,
+    actor: Actor,
 ): Promise<void> {
-    await getNoteForWorkspace(workspaceId, noteId, userId);
+    await authorizeNotebook(workspaceId, actor.id, "note:delete");
+    const note = await getNoteForWorkspace(workspaceId, noteId, actor.id);
+
+    await recordAuditEvent({
+        workspaceId,
+        type: "NOTE_DELETED",
+        actor,
+        context: { targetResourceId: noteId, targetTitle: note.title },
+    });
+
     await deleteNoteRecord(noteId);
 }
 

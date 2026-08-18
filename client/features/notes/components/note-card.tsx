@@ -28,6 +28,7 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useNotebookCan } from "@/features/collaboration";
 import { useDeleteNote } from "../hooks/use-notes";
 import { noteFileName, noteToMarkdown } from "../lib/export";
 import { CitedSourceList } from "./cited-source-list";
@@ -74,6 +75,8 @@ export function NoteCard({ note }: NoteCardProps) {
     const [editOpen, setEditOpen] = useState(false);
     const [deleteOpen, setDeleteOpen] = useState(false);
     const deleteNote = useDeleteNote(note.workspaceId);
+    const canEdit = useNotebookCan("note:update");
+    const canDelete = useNotebookCan("note:delete");
     const citations = readNoteCitations(note.citations);
     const { Icon, label } = originBadge(note);
 
@@ -112,22 +115,30 @@ export function NoteCard({ note }: NoteCardProps) {
                         <MoreVerticalIcon />
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-48">
-                        <DropdownMenuItem onClick={() => setEditOpen(true)}>
-                            <PencilIcon />
-                            Edit
-                        </DropdownMenuItem>
+                        {canEdit ? (
+                            <DropdownMenuItem onClick={() => setEditOpen(true)}>
+                                <PencilIcon />
+                                Edit
+                            </DropdownMenuItem>
+                        ) : null}
+                        {/* Exporting is a re-rendering of what the reader can
+                            already see, so it stays available at every role. */}
                         <DropdownMenuItem onClick={() => downloadMarkdown(note)}>
                             <DownloadIcon />
                             Export Markdown
                         </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                            variant="destructive"
-                            onClick={() => setDeleteOpen(true)}
-                        >
-                            <Trash2Icon />
-                            Delete
-                        </DropdownMenuItem>
+                        {canDelete ? (
+                            <>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                    variant="destructive"
+                                    onClick={() => setDeleteOpen(true)}
+                                >
+                                    <Trash2Icon />
+                                    Delete
+                                </DropdownMenuItem>
+                            </>
+                        ) : null}
                     </DropdownMenuContent>
                 </DropdownMenu>
             </div>

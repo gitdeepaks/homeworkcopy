@@ -18,6 +18,7 @@ import {
     renameArtifactSchema,
 } from "../validators/artifact.validator.js";
 import { workspaceIdParamSchema } from "../validators/workspace.validator.js";
+import { actorOf } from "../utils/actor.js";
 
 export async function listArtifacts(req: Request, res: Response) {
     const { workspaceId } = workspaceIdParamSchema.parse(req.params);
@@ -43,7 +44,7 @@ export async function getArtifactAudio(req: Request, res: Response) {
     const access = await getArtifactAudioForWorkspace(
         workspaceId,
         artifactId,
-        req.session.user.id,
+        actorOf(req),
     );
 
     // Signed URLs are short-lived; a cached copy would outlive its signature.
@@ -118,10 +119,6 @@ export async function cancelArtifact(req: Request, res: Response) {
 
 export async function deleteArtifact(req: Request, res: Response) {
     const { workspaceId, artifactId } = artifactIdParamSchema.parse(req.params);
-    await deleteArtifactForWorkspace(
-        workspaceId,
-        artifactId,
-        req.session.user.id,
-    );
+    await deleteArtifactForWorkspace(workspaceId, artifactId, actorOf(req));
     res.status(204).send();
 }

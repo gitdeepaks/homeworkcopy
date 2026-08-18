@@ -21,6 +21,7 @@ import {
     chatGuideBodySchema,
 } from "../validators/chat.validator.js";
 import { workspaceIdParamSchema } from "../validators/workspace.validator.js";
+import { actorOf } from "../utils/actor.js";
 
 export async function listConversations(req: Request, res: Response) {
     const { workspaceId } = workspaceIdParamSchema.parse(req.params);
@@ -59,7 +60,7 @@ export async function deleteConversation(req: Request, res: Response) {
     await deleteConversationForWorkspace(
         workspaceId,
         conversationId,
-        req.session.user.id,
+        actorOf(req),
     );
     res.status(204).send();
 }

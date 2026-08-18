@@ -4,6 +4,10 @@ const isProtectedRoute = createRouteMatcher([
     "/dashboard(.*)",
     "/workspace(.*)",
     "/settings(.*)",
+    // Redeeming a share link requires an account: a notebook's members must
+    // always be people the owner can see and remove.
+    "/invite(.*)",
+    "/share(.*)",
 ]);
 
 export const proxy = clerkMiddleware(async (auth, request) => {

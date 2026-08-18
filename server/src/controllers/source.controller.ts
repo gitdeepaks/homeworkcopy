@@ -28,6 +28,7 @@ import {
     workspaceIdParamSchema,
     uploadFileFieldsSchema,
 } from "../validators/source.validator.js";
+import { actorOf } from "../utils/actor.js";
 
 function getIdempotencyKey(req: Request): string | undefined {
     return idempotencyKeyHeaderSchema.parse(req.headers)["idempotency-key"];
@@ -142,11 +143,7 @@ export async function importYoutube(req: Request, res: Response) {
 
 export async function deleteSource(req: Request, res: Response) {
     const { workspaceId, sourceId } = sourceIdParamSchema.parse(req.params);
-    await deleteSourceForWorkspace(
-        workspaceId,
-        sourceId,
-        req.session.user.id,
-    );
+    await deleteSourceForWorkspace(workspaceId, actorOf(req), sourceId);
     res.status(202).send();
 }
 
@@ -155,7 +152,7 @@ export async function bulkDeleteSources(req: Request, res: Response) {
     const input = bulkDeleteSourcesSchema.parse(req.body);
     await bulkDeleteSourcesForWorkspace(
         workspaceId,
-        req.session.user.id,
+        actorOf(req),
         input.sourceIds,
     );
     res.status(204).send();

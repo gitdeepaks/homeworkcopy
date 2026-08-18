@@ -1,27 +1,39 @@
-import { apiFetch, apiFetchVoid } from "@/shared/lib/api";
-import type {
-    CreateWorkspaceInput,
-    UpdateWorkspaceInput,
-    Workspace,
-} from "./types";
+import {
+    notebookSummarySchema,
+    type NotebookScope,
+} from "@homeworkcopy/contracts";
+import { z } from "zod";
+import { apiFetchVoid, apiFetchWithSchema } from "@/shared/lib/api";
+import type { CreateWorkspaceInput, UpdateWorkspaceInput } from "./types";
 
-export function listWorkspaces() {
-    return apiFetch<Workspace[]>("/api/workspaces");
+/**
+ * Lists the notebooks behind one dashboard tab.
+ *
+ * @param scope - `mine` for owned notebooks, `shared` for ones shared with you
+ */
+export function listWorkspaces(scope: NotebookScope = "mine") {
+    return apiFetchWithSchema(
+        `/api/workspaces?scope=${scope}`,
+        z.array(notebookSummarySchema),
+    );
 }
 
 export function getWorkspace(id: string) {
-    return apiFetch<Workspace>(`/api/workspaces/${id}`);
+    return apiFetchWithSchema(
+        `/api/workspaces/${id}`,
+        notebookSummarySchema,
+    );
 }
 
 export function createWorkspace(input: CreateWorkspaceInput) {
-    return apiFetch<Workspace>("/api/workspaces", {
+    return apiFetchWithSchema(`/api/workspaces`, notebookSummarySchema, {
         method: "POST",
         body: JSON.stringify(input),
     });
 }
 
 export function updateWorkspace(id: string, input: UpdateWorkspaceInput) {
-    return apiFetch<Workspace>(`/api/workspaces/${id}`, {
+    return apiFetchWithSchema(`/api/workspaces/${id}`, notebookSummarySchema, {
         method: "PATCH",
         body: JSON.stringify(input),
     });

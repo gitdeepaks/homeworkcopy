@@ -83,7 +83,11 @@ import {
     generateOutputContent,
     OUTPUT_PROVIDER,
 } from "./artifact-generation.service.js";
-import { getWorkspaceByIdForUser } from "./workspace.service.js";
+import { recordAuditEvent } from "./audit.service.js";
+import {
+    authorizeNotebook,
+    type Actor,
+} from "./notebook-access.service.js";
 import {
     resolveReadySourceRecords,
     resolveReadySourcesForWorkspace,
@@ -204,7 +208,7 @@ export async function listArtifactsForWorkspace(
     workspaceId: string,
     userId: string,
 ) {
-    await getWorkspaceByIdForUser(workspaceId, userId);
+    await authorizeNotebook(workspaceId, userId, "notebook:read");
     return findArtifactsByWorkspaceId(workspaceId);
 }
 
@@ -222,7 +226,7 @@ export async function getArtifactForWorkspace(
     artifactId: string,
     userId: string,
 ) {
-    await getWorkspaceByIdForUser(workspaceId, userId);
+    await authorizeNotebook(workspaceId, userId, "notebook:read");
 
     const artifact = await findArtifactByIdAndWorkspaceId(
         artifactId,
@@ -255,6 +259,7 @@ export async function createArtifactForWorkspace(
     userId: string,
     input: CreateArtifactInput,
 ) {
+    await authorizeNotebook(workspaceId, userId, "output:create");
     assertOutputTypeAvailable(input.type);
 
     const sources = await resolveReadySourcesForWorkspace(
@@ -305,6 +310,7 @@ export async function renameArtifactForWorkspace(
     userId: string,
     title: string,
 ) {
+    await authorizeNotebook(workspaceId, userId, "output:update");
     await getArtifactForWorkspace(workspaceId, artifactId, userId);
     return updateArtifactRecord(artifactId, { title });
 }
@@ -330,6 +336,7 @@ export async function updateArtifactContentForWorkspace(
     userId: string,
     input: EditOutputContentRequest,
 ) {
+    await authorizeNotebook(workspaceId, userId, "output:update");
     const artifact = await getArtifactForWorkspace(
         workspaceId,
         artifactId,
@@ -397,6 +404,7 @@ export async function regenerateArtifactForWorkspace(
     artifactId: string,
     userId: string,
 ) {
+    await authorizeNotebook(workspaceId, userId, "output:update");
     const artifact = await getArtifactForWorkspace(
         workspaceId,
         artifactId,
@@ -441,6 +449,7 @@ export async function duplicateArtifactForWorkspace(
     artifactId: string,
     userId: string,
 ) {
+    await authorizeNotebook(workspaceId, userId, "output:create");
     const artifact = await getArtifactForWorkspace(
         workspaceId,
         artifactId,
@@ -493,6 +502,7 @@ export async function cancelArtifactForWorkspace(
     artifactId: string,
     userId: string,
 ) {
+    await authorizeNotebook(workspaceId, userId, "output:update");
     await getArtifactForWorkspace(workspaceId, artifactId, userId);
 
     const cancelled = await cancelArtifactRecord(artifactId);
@@ -517,13 +527,22 @@ export async function cancelArtifactForWorkspace(
 export async function deleteArtifactForWorkspace(
     workspaceId: string,
     artifactId: string,
-    userId: string,
+    actor: Actor,
 ) {
+    await authorizeNotebook(workspaceId, actor.id, "output:delete");
     const artifact = await getArtifactForWorkspace(
         workspaceId,
         artifactId,
-        userId,
+        actor.id,
     );
+
+    await recordAuditEvent({
+        workspaceId,
+        type: "OUTPUT_DELETED",
+        actor,
+        context: { targetResourceId: artifactId, targetTitle: artifact.title },
+    });
+
     const publicId = storedMediaPublicId(artifact);
 
     if (publicId) {
@@ -585,12 +604,13 @@ function playableMediaOf(artifact: ArtifactRecord): AudioMedia | null {
 export async function getArtifactAudioForWorkspace(
     workspaceId: string,
     artifactId: string,
-    userId: string,
+    actor: Actor,
 ): Promise<OutputAudioAccess> {
+    await authorizeNotebook(workspaceId, actor.id, "output:download");
     const artifact = await getArtifactForWorkspace(
         workspaceId,
         artifactId,
-        userId,
+        actor.id,
     );
 
     if (!NARRATED_OUTPUT_TYPES.has(artifact.type)) {
@@ -603,6 +623,15 @@ export async function getArtifactAudioForWorkspace(
     }
 
     const urls = signAudioUrls(media.storage.publicId);
+
+    // Signed URLs are the one path by which generated media leaves the product,
+    // so minting them is the export event worth recording.
+    await recordAuditEvent({
+        workspaceId,
+        type: "OUTPUT_MEDIA_EXPORTED",
+        actor,
+        context: { targetResourceId: artifactId, targetTitle: artifact.title },
+    });
 
     return {
         version: 1,

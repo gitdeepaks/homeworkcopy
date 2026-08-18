@@ -39,6 +39,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { OUTPUT_TITLE_MAX_LENGTH } from "@homeworkcopy/contracts";
+import { useNotebookCan } from "@/features/collaboration";
 import {
     useCancelOutput,
     useDeleteOutput,
@@ -86,6 +87,9 @@ export function OutputActionsMenu({
     const duplicateOutput = useDuplicateOutput(output.workspaceId);
     const cancelOutput = useCancelOutput(output.workspaceId);
     const deleteOutput = useDeleteOutput(output.workspaceId);
+    const canUpdate = useNotebookCan("output:update");
+    const canCreate = useNotebookCan("output:create");
+    const canDelete = useNotebookCan("output:delete");
 
     const generating = isOutputGenerating(output.status);
     const error =
@@ -136,15 +140,19 @@ export function OutputActionsMenu({
                     <MoreVerticalIcon />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-52">
-                    <DropdownMenuItem
-                        onClick={() => {
-                            setTitle(output.title);
-                            setRenameOpen(true);
-                        }}
-                    >
-                        <PencilIcon />
-                        Rename
-                    </DropdownMenuItem>
+                    {canUpdate ? (
+                        <DropdownMenuItem
+                            onClick={() => {
+                                setTitle(output.title);
+                                setRenameOpen(true);
+                            }}
+                        >
+                            <PencilIcon />
+                            Rename
+                        </DropdownMenuItem>
+                    ) : null}
+                    {/* Exporting re-renders what the reader can already read,
+                        so it stays available at every role. */}
                     <DropdownMenuItem
                         disabled={output.status !== "READY"}
                         onClick={() => downloadMarkdown(output)}
@@ -152,41 +160,55 @@ export function OutputActionsMenu({
                         <DownloadIcon />
                         Export Markdown
                     </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    {generating ? (
+                    {canUpdate ? (
+                        <>
+                            <DropdownMenuSeparator />
+                            {generating ? (
+                                <DropdownMenuItem
+                                    disabled={cancelOutput.isPending}
+                                    onClick={() =>
+                                        cancelOutput.mutate(output.id)
+                                    }
+                                >
+                                    <SquareIcon />
+                                    Stop generating
+                                </DropdownMenuItem>
+                            ) : (
+                                <DropdownMenuItem
+                                    disabled={regenerateOutput.isPending}
+                                    onClick={() =>
+                                        regenerateOutput.mutate(output.id)
+                                    }
+                                >
+                                    <RefreshCwIcon />
+                                    {output.status === "READY"
+                                        ? "Regenerate"
+                                        : "Retry generation"}
+                                </DropdownMenuItem>
+                            )}
+                        </>
+                    ) : null}
+                    {canCreate ? (
                         <DropdownMenuItem
-                            disabled={cancelOutput.isPending}
-                            onClick={() => cancelOutput.mutate(output.id)}
+                            disabled={duplicateOutput.isPending}
+                            onClick={() => duplicateOutput.mutate(output.id)}
                         >
-                            <SquareIcon />
-                            Stop generating
+                            <CopyIcon />
+                            Duplicate
                         </DropdownMenuItem>
-                    ) : (
-                        <DropdownMenuItem
-                            disabled={regenerateOutput.isPending}
-                            onClick={() => regenerateOutput.mutate(output.id)}
-                        >
-                            <RefreshCwIcon />
-                            {output.status === "READY"
-                                ? "Regenerate"
-                                : "Retry generation"}
-                        </DropdownMenuItem>
-                    )}
-                    <DropdownMenuItem
-                        disabled={duplicateOutput.isPending}
-                        onClick={() => duplicateOutput.mutate(output.id)}
-                    >
-                        <CopyIcon />
-                        Duplicate
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                        variant="destructive"
-                        onClick={() => setDeleteOpen(true)}
-                    >
-                        <Trash2Icon />
-                        Delete
-                    </DropdownMenuItem>
+                    ) : null}
+                    {canDelete ? (
+                        <>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                                variant="destructive"
+                                onClick={() => setDeleteOpen(true)}
+                            >
+                                <Trash2Icon />
+                                Delete
+                            </DropdownMenuItem>
+                        </>
+                    ) : null}
                 </DropdownMenuContent>
             </DropdownMenu>
 

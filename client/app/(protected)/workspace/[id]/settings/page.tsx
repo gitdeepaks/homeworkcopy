@@ -19,6 +19,13 @@ export default async function WorkspaceSettingsPage({
         notFound();
     }
 
+    // Settings are the owner's: renaming and deleting decide what the notebook
+    // is for everyone in it. A collaborator following a stale link is told the
+    // page is not theirs rather than shown a form the server would refuse.
+    if (workspace.role !== "OWNER") {
+        notFound();
+    }
+
     return (
         <WorkspaceShell workspace={workspace}>
             <WorkspaceSettingsForm workspace={workspace} />

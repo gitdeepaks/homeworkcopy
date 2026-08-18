@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { z } from "zod";
 import {
     NOTEBOOK_PROCESSING_MAX,
     NOTEBOOK_SOURCE_MAX,
@@ -7,6 +8,7 @@ import {
     SOURCE_EXTRACTED_TEXT_MAX_LENGTH,
     SOURCE_TRANSCRIPT_SEGMENT_MAX,
     SOURCE_UPLOAD_MAX_BYTES,
+    sourceFailureCodeSchema,
     type SourceFailureCode,
 } from "@homeworkcopy/contracts";
 import { ConflictError, ValidationError } from "../types/app-error.js";
@@ -159,11 +161,34 @@ export function enforceNotebookIngestionLimits(
     }
 }
 
+/**
+ * A failure that already classified itself.
+ *
+ * Matched on `code` rather than with `instanceof`, and rather than on any
+ * property we might prefer. Processing errors are thrown inside an Inngest step
+ * and caught outside it, and Inngest rebuilds them from a fixed set of fields —
+ * `name`, `message`, `stack`, `cause`, and `code`. Arbitrary own properties are
+ * dropped in transit, so `code` is the only place a classification can be put
+ * and still be there on the other side.
+ */
+const classifiedFailureSchema = z.object({
+    code: sourceFailureCodeSchema,
+    message: z.string().min(1),
+});
+
 export function getSafeProcessingFailure(error: Error): {
     code: SourceFailureCode;
     message: string;
 } {
-    if (error instanceof ValidationError) {
+    const classified = classifiedFailureSchema.safeParse(error);
+    if (classified.success) {
+        return {
+            code: classified.data.code,
+            message: classified.data.message,
+        };
+    }
+
+    if (error instanceof ValidationError || error.name === "ValidationError") {
         const contentLimit = error.message.includes("limit") || error.message.includes("too many");
         return {
             code: contentLimit ? "CONTENT_TOO_LARGE" : "EXTRACTION_FAILED",

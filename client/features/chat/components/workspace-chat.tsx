@@ -82,6 +82,7 @@ import {
 import { SaveExcerptButton, type NoteDraftCitation } from "@/features/notes";
 import { ChatMessageBody } from "./chat-message-body";
 import { CitationSources } from "./citation-sources";
+import { useNotebookCan } from "@/features/collaboration";
 import { ChatComposer } from "./chat-composer";
 import type { ChatCitation } from "../lib/types";
 
@@ -225,7 +226,15 @@ export function WorkspaceChat({
         }),
         [sources],
     );
-    const selectionWarning = sourcesError
+    // Read-only access still shows every answer and citation; what changes is
+    // whether this reader can add to the notebook's shared history.
+    const canChat = useNotebookCan("chat:write");
+    const canManageConversations = useNotebookCan("conversation:manage");
+    const canSaveAsOutput = useNotebookCan("output:create");
+    const canSaveNotes = useNotebookCan("note:create");
+    const selectionWarning = !canChat
+        ? "You have view-only access to this notebook. You can read its chats but not add to them."
+        : sourcesError
         ? "Could not verify the selected sources. Try again."
         : sourceSelection.exceedsSourceLimit
           ? "Choose at most 50 sources for grounding."
@@ -235,7 +244,10 @@ export function WorkspaceChat({
               ? "Select at least one ready source before asking a question."
               : undefined;
     const canSend =
-        !sourcesLoading && !sourcesError && sourceSelection.canUseSelection;
+        canChat &&
+        !sourcesLoading &&
+        !sourcesError &&
+        sourceSelection.canUseSelection;
     const { data: storedMessages, isLoading: messagesLoading } =
         useConversationMessages(workspaceId, conversationId);
     const deleteConversation = useDeleteConversation(workspaceId);
@@ -563,14 +575,16 @@ export function WorkspaceChat({
                     </DropdownMenuContent>
                 </DropdownMenu>
 
-                <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void handleNewChat()}
-                >
-                    <MessageSquarePlusIcon />
-                    New
-                </Button>
+                {canManageConversations ? (
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void handleNewChat()}
+                    >
+                        <MessageSquarePlusIcon />
+                        New
+                    </Button>
+                ) : null}
 
                 <Button
                     variant="outline"
@@ -582,7 +596,7 @@ export function WorkspaceChat({
                     Export
                 </Button>
 
-                {conversationId ? (
+                {conversationId && canManageConversations ? (
                     <>
                         <Button
                             variant="ghost"
@@ -776,7 +790,7 @@ export function WorkspaceChat({
                                                                             variant="ghost"
                                                                             size="icon-sm"
                                                                             aria-label="Regenerate answer"
-                                                                            disabled={isStreaming || message.id !== latestAssistantId}
+                                                                            disabled={!canChat || isStreaming || message.id !== latestAssistantId}
                                                                             onClick={() => void handleRetry(message.id)}
                                                                         >
                                                                             <RefreshCwIcon />
@@ -785,7 +799,7 @@ export function WorkspaceChat({
                                                                             variant="ghost"
                                                                             size="icon-sm"
                                                                             aria-label="Mark answer helpful"
-                                                                            disabled={!conversationId}
+                                                                            disabled={!conversationId || !canManageConversations}
                                                                             onClick={() => conversationId && messageFeedback.mutate({ conversationId, messageId: message.id, feedback: "HELPFUL" })}
                                                                         >
                                                                             <ThumbsUpIcon />
@@ -794,12 +808,12 @@ export function WorkspaceChat({
                                                                             variant="ghost"
                                                                             size="icon-sm"
                                                                             aria-label="Mark answer not helpful"
-                                                                            disabled={!conversationId}
+                                                                            disabled={!conversationId || !canManageConversations}
                                                                             onClick={() => conversationId && messageFeedback.mutate({ conversationId, messageId: message.id, feedback: "NOT_HELPFUL" })}
                                                                         >
                                                                             <ThumbsDownIcon />
                                                                         </Button>
-                                                                        {conversationId ? (
+                                                                        {conversationId && canSaveNotes ? (
                                                                             <SaveExcerptButton
                                                                                 compact
                                                                                 workspaceId={workspaceId}
@@ -817,7 +831,7 @@ export function WorkspaceChat({
                                                                             variant="ghost"
                                                                             size="icon-sm"
                                                                             aria-label="Save answer as output"
-                                                                            disabled={!conversationId || saveMessage.isPending}
+                                                                            disabled={!conversationId || !canSaveAsOutput || saveMessage.isPending}
                                                                             onClick={() => {
                                                                                 if (!conversationId) return;
                                                                                 saveMessage.mutate(

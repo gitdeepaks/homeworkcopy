@@ -4,6 +4,7 @@ import { useState } from "react";
 import { NotebookPenIcon, PlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useNotebookCan } from "@/features/collaboration";
 import { useNotes } from "../hooks/use-notes";
 import { NoteCard } from "./note-card";
 import { NoteEditorDialog } from "./note-editor-dialog";
@@ -21,6 +22,7 @@ type NotesListProps = {
  */
 export function NotesList({ workspaceId }: NotesListProps) {
     const [createOpen, setCreateOpen] = useState(false);
+    const canWriteNotes = useNotebookCan("note:create");
     const { data: notes = [], isLoading, error } = useNotes(workspaceId);
 
     return (
@@ -29,10 +31,17 @@ export function NotesList({ workspaceId }: NotesListProps) {
                 <p className="text-xs text-muted-foreground">
                     {notes.length} note{notes.length === 1 ? "" : "s"}
                 </p>
-                <Button size="sm" variant="outline" onClick={() => setCreateOpen(true)}>
-                    <PlusIcon />
-                    New note
-                </Button>
+                {canWriteNotes ? (
+                    <Button
+                        size="sm"
+                        variant="outline"
+                        className="min-h-11"
+                        onClick={() => setCreateOpen(true)}
+                    >
+                        <PlusIcon />
+                        New note
+                    </Button>
+                ) : null}
             </div>
 
             {isLoading ? (
@@ -56,9 +65,15 @@ export function NotesList({ workspaceId }: NotesListProps) {
                             grounded in.
                         </p>
                     </div>
-                    <Button size="sm" onClick={() => setCreateOpen(true)}>
-                        Write a note
-                    </Button>
+                    {canWriteNotes ? (
+                        <Button
+                            size="sm"
+                            className="min-h-11"
+                            onClick={() => setCreateOpen(true)}
+                        >
+                            Write a note
+                        </Button>
+                    ) : null}
                 </div>
             ) : (
                 <ul className="mt-3 space-y-3">
@@ -70,11 +85,13 @@ export function NotesList({ workspaceId }: NotesListProps) {
                 </ul>
             )}
 
-            <NoteEditorDialog
-                workspaceId={workspaceId}
-                open={createOpen}
-                onOpenChange={setCreateOpen}
-            />
+            {canWriteNotes ? (
+                <NoteEditorDialog
+                    workspaceId={workspaceId}
+                    open={createOpen}
+                    onOpenChange={setCreateOpen}
+                />
+            ) : null}
         </div>
     );
 }

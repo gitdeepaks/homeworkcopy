@@ -22,7 +22,11 @@ import {
     updateSourceRecord,
     type SourceRecord,
 } from "../repositories/source.repository.js";
-import { getWorkspaceByIdForUser } from "./workspace.service.js";
+import { recordAuditEvent } from "./audit.service.js";
+import {
+    authorizeNotebook,
+    type Actor,
+} from "./notebook-access.service.js";
 import {
     ConflictError,
     NotFoundError,
@@ -136,7 +140,7 @@ export async function listSourcesForWorkspace(
     userId: string,
     filters: ListSourcesQuery = {},
 ) {
-    await getWorkspaceByIdForUser(workspaceId, userId);
+    await authorizeNotebook(workspaceId, userId, "notebook:read");
     return findSourcesByWorkspaceId(workspaceId, filters);
 }
 
@@ -145,7 +149,7 @@ export async function resolveReadySourcesForWorkspace(
     userId: string,
     selection: SourceSelection,
 ): Promise<SourceRecord[]> {
-    await getWorkspaceByIdForUser(workspaceId, userId);
+    await authorizeNotebook(workspaceId, userId, "notebook:read");
     return resolveReadySourceRecords(workspaceId, selection);
 }
 
@@ -182,7 +186,7 @@ export async function getSourceForWorkspace(
     sourceId: string,
     userId: string,
 ): Promise<SourceRecord> {
-    await getWorkspaceByIdForUser(workspaceId, userId);
+    await authorizeNotebook(workspaceId, userId, "notebook:read");
 
     const source = await findSourceByIdAndWorkspaceId(sourceId, workspaceId);
 
@@ -208,7 +212,7 @@ export async function createTextOrMarkdownSource(
     input: CreateSourceInput,
     idempotencyKey?: string,
 ) {
-    await getWorkspaceByIdForUser(workspaceId, userId);
+    await authorizeNotebook(workspaceId, userId, "source:create");
 
     return createAndProcessSource({
         workspaceId,
@@ -238,7 +242,7 @@ export async function uploadPdfSource(
     title?: string,
     idempotencyKey?: string,
 ) {
-    await getWorkspaceByIdForUser(workspaceId, userId);
+    await authorizeNotebook(workspaceId, userId, "source:create");
     verifyPdfUpload(file);
 
     const contentChecksum = checksumContent(file.buffer);
@@ -321,7 +325,7 @@ export async function uploadAudioSource(
     title?: string,
     idempotencyKey?: string,
 ) {
-    await getWorkspaceByIdForUser(workspaceId, userId);
+    await authorizeNotebook(workspaceId, userId, "source:create");
 
     if (!isAudioSourceIngestionAvailable()) {
         throw new ValidationError(
@@ -417,7 +421,7 @@ export async function importWebsiteSource(
     input: ImportWebsiteInput,
     idempotencyKey?: string,
 ) {
-    await getWorkspaceByIdForUser(workspaceId, userId);
+    await authorizeNotebook(workspaceId, userId, "source:create");
     const url = canonicalizeSourceUrl(input.url);
 
     return createAndProcessSource({
@@ -450,7 +454,7 @@ export async function importYoutubeSource(
     input: ImportYoutubeInput,
     idempotencyKey?: string,
 ) {
-    await getWorkspaceByIdForUser(workspaceId, userId);
+    await authorizeNotebook(workspaceId, userId, "source:create");
     const url = canonicalizeSourceUrl(input.url);
     const videoId = url.match(
         /(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([\w-]{11})/,
@@ -483,10 +487,23 @@ export async function importYoutubeSource(
  */
 export async function deleteSourceForWorkspace(
     workspaceId: string,
+    actor: Actor,
     sourceId: string,
-    userId: string,
 ) {
-    const source = await getSourceForWorkspace(workspaceId, sourceId, userId);
+    await authorizeNotebook(workspaceId, actor.id, "source:delete");
+    const source = await getSourceForWorkspace(
+        workspaceId,
+        sourceId,
+        actor.id,
+    );
+
+    await recordAuditEvent({
+        workspaceId,
+        type: "SOURCE_DELETED",
+        actor,
+        context: { targetResourceId: sourceId, targetTitle: source.title },
+    });
+
     if (source.status !== "DELETING") {
         await updateSourceRecord(sourceId, {
             status: "DELETING",
@@ -580,13 +597,13 @@ export async function getSourceChunksForWorkspace(
  */
 export async function bulkDeleteSourcesForWorkspace(
     workspaceId: string,
-    userId: string,
+    actor: Actor,
     sourceIds: string[],
 ) {
-    await getWorkspaceByIdForUser(workspaceId, userId);
+    await authorizeNotebook(workspaceId, actor.id, "source:delete");
 
     for (const sourceId of sourceIds) {
-        await deleteSourceForWorkspace(workspaceId, sourceId, userId);
+        await deleteSourceForWorkspace(workspaceId, actor, sourceId);
     }
 }
 
@@ -608,7 +625,7 @@ export async function reprocessSourcesForWorkspace(
     userId: string,
     input: ReprocessSourcesInput = {},
 ) {
-    await getWorkspaceByIdForUser(workspaceId, userId);
+    await authorizeNotebook(workspaceId, userId, "source:reprocess");
 
     const sources = await findSourcesByWorkspaceId(workspaceId, {
         status: "FAILED",
@@ -640,6 +657,7 @@ export async function reprocessSourceForWorkspace(
     sourceId: string,
     userId: string,
 ) {
+    await authorizeNotebook(workspaceId, userId, "source:reprocess");
     const source = await getSourceForWorkspace(workspaceId, sourceId, userId);
 
     await removeSourceFromIndex(workspaceId, sourceId);
@@ -694,7 +712,7 @@ export async function importWebSearchSource(
     input: ImportWebSearchInput,
     idempotencyKey?: string,
 ) {
-    await getWorkspaceByIdForUser(workspaceId, userId);
+    await authorizeNotebook(workspaceId, userId, "source:create");
 
     return createAndProcessSource({
         workspaceId,

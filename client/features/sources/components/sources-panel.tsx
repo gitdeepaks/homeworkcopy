@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
+import { useNotebookCan } from "@/features/collaboration";
 import { useNotebookUiStore } from "@/features/workspaces/stores/notebook-ui-store";
 import { useDeleteSource, useReprocessSource, useSources } from "../hooks/use-sources";
 import { sourceRoutes } from "../lib/routes";
@@ -25,6 +26,11 @@ const EMPTY_SELECTED_SOURCE_IDS: string[] = [];
 export function SourcesPanel({ workspaceId }: SourcesPanelProps) {
     const [query, setQuery] = useState("");
     const [addOpen, setAddOpen] = useState(false);
+    // A viewer reads the same list, selects the same sources for grounding, and
+    // opens the same documents — they simply cannot change what is in it.
+    const canAddSources = useNotebookCan("source:create");
+    const canRemoveSources = useNotebookCan("source:delete");
+    const canReprocess = useNotebookCan("source:reprocess");
     const { data: sources = [], isLoading, error } = useSources(workspaceId);
     const deleteSource = useDeleteSource(workspaceId);
     const reprocessSource = useReprocessSource(workspaceId);
@@ -81,10 +87,16 @@ export function SourcesPanel({ workspaceId }: SourcesPanelProps) {
                         <h2 id="sources-panel-title" className="font-heading text-xl font-bold">Sources</h2>
                         <p className="text-xs text-muted-foreground">{sources.length} notebook references</p>
                     </div>
-                    <Button size="icon-sm" onClick={() => setAddOpen(true)}>
-                        <PlusIcon />
-                        <span className="sr-only">Add source</span>
-                    </Button>
+                    {canAddSources ? (
+                        <Button
+                            size="icon-sm"
+                            className="size-11"
+                            onClick={() => setAddOpen(true)}
+                        >
+                            <PlusIcon />
+                            <span className="sr-only">Add source</span>
+                        </Button>
+                    ) : null}
                 </div>
                 <div className="relative mt-3">
                     <SearchIcon className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -180,7 +192,7 @@ export function SourcesPanel({ workspaceId }: SourcesPanelProps) {
                                         <BookOpenIcon />
                                         <span className="sr-only">Open {source.title}</span>
                                     </Button>
-                                    {source.status === "FAILED" ? (
+                                    {source.status === "FAILED" && canReprocess ? (
                                         <Button
                                             type="button"
                                             variant="ghost"
@@ -192,7 +204,7 @@ export function SourcesPanel({ workspaceId }: SourcesPanelProps) {
                                             <RotateCcwIcon />
                                             <span className="sr-only">Retry {source.title}</span>
                                         </Button>
-                                    ) : source.status !== "DELETING" ? (
+                                    ) : !canRemoveSources ? null : source.status !== "DELETING" ? (
                                         <Button
                                             type="button"
                                             variant="ghost"
@@ -221,7 +233,7 @@ export function SourcesPanel({ workspaceId }: SourcesPanelProps) {
                                             <span className="sr-only">Retry cleanup for {source.title}</span>
                                         </Button>
                                     )}
-                                    {source.status === "FAILED" ? (
+                                    {source.status === "FAILED" && canRemoveSources ? (
                                         <Button
                                             type="button"
                                             variant="ghost"
@@ -276,12 +288,16 @@ export function SourcesPanel({ workspaceId }: SourcesPanelProps) {
                     </p>
                 ) : null}
             </div>
-            <AddSourceDialog
-                workspaceId={workspaceId}
-                open={addOpen}
-                onOpenChange={setAddOpen}
-                onSuccess={(sourceId) => addSelectedSourceId(workspaceId, sourceId)}
-            />
+            {canAddSources ? (
+                <AddSourceDialog
+                    workspaceId={workspaceId}
+                    open={addOpen}
+                    onOpenChange={setAddOpen}
+                    onSuccess={(sourceId) =>
+                        addSelectedSourceId(workspaceId, sourceId)
+                    }
+                />
+            ) : null}
         </section>
     );
 }

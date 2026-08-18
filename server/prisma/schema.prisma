@@ -8,18 +8,22 @@ datasource db {
 }
 
 model User {
-  id            String      @id
-  clerkUserId   String?     @unique
+  id            String               @id
+  clerkUserId   String?              @unique
   name          String
   email         String
-  emailVerified Boolean     @default(false)
+  emailVerified Boolean              @default(false)
   image         String?
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
   sessions      Session[]
   accounts      Account[]
   workspaces    Workspace[]
   chatUsage     ChatUsage[]
+  memberships   NotebookMember[]     @relation("NotebookMembership")
+  invitesSent   NotebookInvitation[] @relation("NotebookInvitationInviter")
+  shareLinks    NotebookShareLink[]  @relation("NotebookShareLinkCreator")
+  auditEvents   AuditEvent[]         @relation("AuditEventActor")
 
   @@unique([email])
   @@map("user")
@@ -92,19 +96,23 @@ model Verification {
 }
 
 model Workspace {
-  id            String             @id @default(cuid())
+  id            String               @id @default(cuid())
   userId        String
   title         String
   description   String?
   icon          String?
-  defaultModel  String             @default("gpt-4o-mini")
-  createdAt     DateTime           @default(now())
-  updatedAt     DateTime           @updatedAt
-  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  defaultModel  String               @default("gpt-4o-mini")
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  user          User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   sources       Source[]
   conversations Conversation[]
   artifacts     LearningArtifact[]
   notes         Note[]
+  members       NotebookMember[]
+  invitations   NotebookInvitation[]
+  shareLink     NotebookShareLink?
+  auditEvents   AuditEvent[]
 
   @@index([userId])
   @@map("workspace")
@@ -140,41 +148,41 @@ enum SourceProcessingStage {
 }
 
 model Source {
-  id          String        @id @default(cuid())
-  workspaceId String
-  type        SourceType
-  title       String
-  content     String?
-  url         String?
-  status      SourceStatus  @default(PENDING)
-  processingStage SourceProcessingStage @default(QUEUED)
-  processingVersion Int @default(1)
-  contentChecksum String?
-  idempotencyKey String?
-  metadata    Json?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  chunks      SourceChunk[]
+  id                String                @id @default(cuid())
+  workspaceId       String
+  type              SourceType
+  title             String
+  content           String?
+  url               String?
+  status            SourceStatus          @default(PENDING)
+  processingStage   SourceProcessingStage @default(QUEUED)
+  processingVersion Int                   @default(1)
+  contentChecksum   String?
+  idempotencyKey    String?
+  metadata          Json?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  workspace         Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  chunks            SourceChunk[]
 
+  @@unique([workspaceId, contentChecksum])
+  @@unique([workspaceId, idempotencyKey])
   @@index([workspaceId])
   @@index([workspaceId, type])
   @@index([workspaceId, status])
-  @@unique([workspaceId, contentChecksum])
-  @@unique([workspaceId, idempotencyKey])
   @@map("source")
 }
 
 model SourceChunk {
-  id         String   @id @default(cuid())
-  sourceId   String
-  index      Int
-  content    String
-  tokenCount Int?
-  metadata   Json?
-  processingVersion Int @default(1)
-  createdAt  DateTime @default(now())
-  source     Source   @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  id                String   @id @default(cuid())
+  sourceId          String
+  index             Int
+  content           String
+  tokenCount        Int?
+  metadata          Json?
+  processingVersion Int      @default(1)
+  createdAt         DateTime @default(now())
+  source            Source   @relation(fields: [sourceId], references: [id], onDelete: Cascade)
 
   @@unique([sourceId, index])
   @@index([sourceId])
@@ -192,19 +200,19 @@ enum MessageFeedback {
 }
 
 model Conversation {
-  id                  String    @id @default(cuid())
-  workspaceId         String
-  title               String?
-  summary             String?
-  summaryMessageCount Int       @default(0)
-  summarizedAt        DateTime?
-  generationLeaseId   String?
+  id                       String    @id @default(cuid())
+  workspaceId              String
+  title                    String?
+  summary                  String?
+  summaryMessageCount      Int       @default(0)
+  summarizedAt             DateTime?
+  generationLeaseId        String?
   generationLeaseExpiresAt DateTime?
-  historyRevision     Int       @default(0)
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
-  workspace           Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  messages            Message[]
+  historyRevision          Int       @default(0)
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+  workspace                Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  messages                 Message[]
 
   @@index([workspaceId])
   @@index([workspaceId, updatedAt])
@@ -212,25 +220,25 @@ model Conversation {
 }
 
 model Message {
-  id             String       @id @default(cuid())
-  conversationId String
-  role           MessageRole
-  content        String
-  citations      Json?
-  grounding      Json?
+  id              String           @id @default(cuid())
+  conversationId  String
+  role            MessageRole
+  content         String
+  citations       Json?
+  grounding       Json?
   clientMessageId String?
   retryOfId       String?
   supersededAt    DateTime?
   feedback        MessageFeedback?
-  createdAt      DateTime     @default(now())
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  retryOf         Message?     @relation("MessageRetry", fields: [retryOfId], references: [id], onDelete: SetNull)
-  retries         Message[]    @relation("MessageRetry")
+  createdAt       DateTime         @default(now())
+  conversation    Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  retryOf         Message?         @relation("MessageRetry", fields: [retryOfId], references: [id], onDelete: SetNull)
+  retries         Message[]        @relation("MessageRetry")
 
+  @@unique([conversationId, clientMessageId])
   @@index([conversationId])
   @@index([conversationId, createdAt])
   @@index([retryOfId])
-  @@unique([conversationId, clientMessageId])
   @@map("message")
 }
 
@@ -289,21 +297,21 @@ enum ArtifactStage {
 }
 
 model LearningArtifact {
-  id          String         @id @default(cuid())
-  workspaceId String
-  type        ArtifactType
-  title       String
-  content     Json?
-  contentVersion Int         @default(1)
-  sourceIds   String[]
-  status      ArtifactStatus @default(PENDING)
-  stage       ArtifactStage  @default(QUEUED)
-  attemptCount Int           @default(0)
-  cancelledAt DateTime?
-  metadata    Json?
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
-  workspace   Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  id             String         @id @default(cuid())
+  workspaceId    String
+  type           ArtifactType
+  title          String
+  content        Json?
+  contentVersion Int            @default(1)
+  sourceIds      String[]
+  status         ArtifactStatus @default(PENDING)
+  stage          ArtifactStage  @default(QUEUED)
+  attemptCount   Int            @default(0)
+  cancelledAt    DateTime?
+  metadata       Json?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  workspace      Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId])
   @@index([workspaceId, type])
@@ -342,4 +350,134 @@ model Note {
   @@index([workspaceId])
   @@index([workspaceId, updatedAt])
   @@map("note")
+}
+
+/// Roles a collaborator can be granted.
+///
+/// `OWNER` is intentionally absent. `Workspace.userId` is the only record of who
+/// owns a notebook, so the database itself cannot hold a second, disagreeing
+/// answer. The effective-role union lives in @homeworkcopy/contracts.
+enum NotebookMemberRole {
+  EDITOR
+  VIEWER
+}
+
+/// Someone other than the owner who can reach a notebook.
+model NotebookMember {
+  id          String             @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        NotebookMemberRole
+  /// Who let them in. `null` once that account is deleted, or when they joined
+  /// through a share link.
+  invitedById String?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  workspace   Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User               @relation("NotebookMembership", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([userId, updatedAt])
+  @@index([workspaceId])
+  @@map("notebook_member")
+}
+
+enum NotebookInvitationStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+}
+
+/// An invitation to one email address, redeemable once.
+///
+/// Only the token's SHA-256 hash is stored: the link is a bearer capability, so
+/// a database read must never be enough to use one.
+model NotebookInvitation {
+  id               String                   @id @default(cuid())
+  workspaceId      String
+  /// Normalized to lowercase before write, and matched against the accepting
+  /// user's verified email.
+  email            String
+  role             NotebookMemberRole
+  tokenHash        String                   @unique
+  status           NotebookInvitationStatus @default(PENDING)
+  expiresAt        DateTime
+  invitedById      String
+  acceptedByUserId String?
+  acceptedAt       DateTime?
+  revokedAt        DateTime?
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+  workspace        Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  invitedBy        User                     @relation("NotebookInvitationInviter", fields: [invitedById], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, status])
+  @@index([email, status])
+  @@map("notebook_invitation")
+}
+
+/// The notebook's one link-sharing capability.
+///
+/// A notebook has at most one link at a time, so rotating means revoking the old
+/// row and minting a new one — a forwarded link can never outlive its rotation.
+/// Every link grants viewer access and always carries an expiry.
+model NotebookShareLink {
+  id           String    @id @default(cuid())
+  workspaceId  String    @unique
+  tokenHash    String    @unique
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  createdById  String
+  lastJoinedAt DateTime?
+  joinCount    Int       @default(0)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy    User      @relation("NotebookShareLinkCreator", fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@map("notebook_share_link")
+}
+
+/// Membership, sharing, and irreversible operations, recorded so a notebook
+/// owner can answer "who did that?".
+enum AuditEventType {
+  MEMBER_INVITED
+  INVITATION_ACCEPTED
+  INVITATION_REVOKED
+  MEMBER_ROLE_CHANGED
+  MEMBER_REMOVED
+  MEMBER_LEFT
+  OWNERSHIP_TRANSFERRED
+  SHARE_LINK_CREATED
+  SHARE_LINK_REVOKED
+  SHARE_LINK_JOINED
+  NOTEBOOK_DELETED
+  SOURCE_DELETED
+  CONVERSATION_DELETED
+  OUTPUT_DELETED
+  NOTE_DELETED
+  OUTPUT_MEDIA_EXPORTED
+}
+
+/// One recorded action.
+///
+/// The actor link is `SetNull` rather than `Cascade`: deleting an account must
+/// not erase the record that it changed someone else's access.
+model AuditEvent {
+  id          String         @id @default(cuid())
+  workspaceId String
+  type        AuditEventType
+  actorUserId String?
+  /// Actor name captured at write time, so the trail stays readable after the
+  /// account is gone.
+  actorName   String?
+  /// Versioned `auditEventContextSchema` payload: identifiers and roles only.
+  context     Json?
+  createdAt   DateTime       @default(now())
+  workspace   Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  actor       User?          @relation("AuditEventActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt])
+  @@index([actorUserId])
+  @@map("audit_event")
 }

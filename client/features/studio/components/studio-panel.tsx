@@ -4,6 +4,7 @@ import { useState } from "react";
 import { FilePlus2Icon, GraduationCapIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useNotebookCan } from "@/features/collaboration";
 import { NotesList } from "@/features/notes";
 import { useSources } from "@/features/sources";
 import { resolveSourceSelection } from "@/features/sources/lib/grounding";
@@ -35,6 +36,9 @@ const STUDIO_SECTIONS: readonly { id: StudioSection; label: string }[] = [
 
 export function StudioPanel({ workspaceId }: StudioPanelProps) {
     const [createOpen, setCreateOpen] = useState(false);
+    // A viewer reads and exports the notebook's outputs and notes; generating a
+    // new one spends the notebook's model budget, so it stays with editors.
+    const canCreateOutput = useNotebookCan("output:create");
     const [section, setSection] = useState<StudioSection>("outputs");
     const { data: outputs = [], isLoading, error } = useOutputs(workspaceId);
     const { data: sources = [] } = useSources(workspaceId);
@@ -78,14 +82,17 @@ export function StudioPanel({ workspaceId }: StudioPanelProps) {
                             selected
                         </p>
                     </div>
-                    <Button
-                        size="icon-sm"
-                        disabled={section === "notes"}
-                        onClick={() => setCreateOpen(true)}
-                    >
-                        <FilePlus2Icon />
-                        <span className="sr-only">Create output</span>
-                    </Button>
+                    {canCreateOutput ? (
+                        <Button
+                            size="icon-sm"
+                            className="size-11"
+                            disabled={section === "notes"}
+                            onClick={() => setCreateOpen(true)}
+                        >
+                            <FilePlus2Icon />
+                            <span className="sr-only">Create output</span>
+                        </Button>
+                    ) : null}
                 </div>
             </div>
 
@@ -205,11 +212,13 @@ export function StudioPanel({ workspaceId }: StudioPanelProps) {
                 </div>
             )}
 
-            <CreateOutputDialog
-                workspaceId={workspaceId}
-                open={createOpen}
-                onOpenChange={setCreateOpen}
-            />
+            {canCreateOutput ? (
+                <CreateOutputDialog
+                    workspaceId={workspaceId}
+                    open={createOpen}
+                    onOpenChange={setCreateOpen}
+                />
+            ) : null}
         </section>
     );
 }

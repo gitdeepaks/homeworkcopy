@@ -2,7 +2,13 @@
 
 import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
-import { MoreHorizontalIcon, PencilIcon, Trash2Icon } from "lucide-react";
+import {
+    LogOutIcon,
+    MoreHorizontalIcon,
+    PencilIcon,
+    Trash2Icon,
+    UsersIcon,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
     DropdownMenu,
@@ -10,6 +16,8 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Badge } from "@/components/ui/badge";
+import { can, ROLE_LABELS } from "@/features/collaboration/lib/permissions";
 import { cn } from "@/lib/utils";
 import { workspaceRoutes } from "../lib/routes";
 import type { Workspace } from "../lib/types";
@@ -18,6 +26,8 @@ type WorkspaceCardProps = {
     workspace: Workspace;
     onEdit: (workspace: Workspace) => void;
     onDelete: (workspace: Workspace) => void;
+    /** Offered on notebooks the reader does not own. */
+    onLeave?: (workspace: Workspace) => void;
     className?: string;
 };
 
@@ -25,8 +35,12 @@ export function WorkspaceCard({
     workspace,
     onEdit,
     onDelete,
+    onLeave,
     className,
 }: WorkspaceCardProps) {
+    const canEdit = can(workspace.role, "notebook:update");
+    const canDelete = can(workspace.role, "notebook:delete");
+    const canLeave = workspace.role !== "OWNER" && onLeave !== undefined;
     const href = workspaceRoutes.detail(workspace.id);
     return (
         <article
@@ -71,19 +85,32 @@ export function WorkspaceCard({
                                 <span className="sr-only">Open menu</span>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                                <DropdownMenuItem
-                                    onClick={() => onEdit(workspace)}
-                                >
-                                    <PencilIcon />
-                                    Edit
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                    variant="destructive"
-                                    onClick={() => onDelete(workspace)}
-                                >
-                                    <Trash2Icon />
-                                    Delete
-                                </DropdownMenuItem>
+                                {canEdit ? (
+                                    <DropdownMenuItem
+                                        onClick={() => onEdit(workspace)}
+                                    >
+                                        <PencilIcon />
+                                        Edit
+                                    </DropdownMenuItem>
+                                ) : null}
+                                {canLeave ? (
+                                    <DropdownMenuItem
+                                        variant="destructive"
+                                        onClick={() => onLeave(workspace)}
+                                    >
+                                        <LogOutIcon />
+                                        Leave notebook
+                                    </DropdownMenuItem>
+                                ) : null}
+                                {canDelete ? (
+                                    <DropdownMenuItem
+                                        variant="destructive"
+                                        onClick={() => onDelete(workspace)}
+                                    >
+                                        <Trash2Icon />
+                                        Delete
+                                    </DropdownMenuItem>
+                                ) : null}
                             </DropdownMenuContent>
                         </DropdownMenu>
                     </div>
@@ -104,6 +131,24 @@ export function WorkspaceCard({
                             addSuffix: true,
                         })}
                     </p>
+                    {workspace.audience === "shared" ? (
+                        <div className="flex flex-wrap items-center gap-2 pt-1">
+                            <Badge variant="secondary" className="gap-1">
+                                <UsersIcon aria-hidden className="size-3" />
+                                {workspace.memberCount} people
+                            </Badge>
+                            {/* The role is text, not only a colour, so it
+                                survives greyscale and screen readers alike. */}
+                            <Badge variant="outline">
+                                {ROLE_LABELS[workspace.role]}
+                            </Badge>
+                            {workspace.role === "OWNER" ? null : (
+                                <span className="text-xs text-muted-foreground">
+                                    Shared by {workspace.ownerName}
+                                </span>
+                            )}
+                        </div>
+                    ) : null}
                 </div>
             </div>
         </article>

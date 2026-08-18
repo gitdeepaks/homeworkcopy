@@ -14,6 +14,7 @@ import {
 import { AccountMenu } from "@/features/auth/components/account-menu";
 import { WorkspaceChat } from "@/features/chat";
 import { useChatPreferences } from "@/features/chat/stores/chat-preferences";
+import { NotebookAccessProvider } from "@/features/collaboration";
 import { StudioPanel } from "@/features/studio";
 import { SourcesPanel } from "@/features/sources/components/sources-panel";
 import { SourceViewer } from "@/features/sources/components/source-viewer";
@@ -94,6 +95,7 @@ export function WorkspaceShell({ workspace, children }: WorkspaceShellProps) {
     }
 
     return (
+        <NotebookAccessProvider role={workspace.role}>
         <div className="notebook-canvas flex h-svh min-h-0 flex-col p-0 md:p-3">
             <div className="ruled-paper flex min-h-0 flex-1 flex-col overflow-hidden rounded-none md:rounded-md">
                 <header
@@ -262,5 +264,6 @@ export function WorkspaceShell({ workspace, children }: WorkspaceShellProps) {
                 </main>
             </div>
         </div>
+        </NotebookAccessProvider>
     );
 }

@@ -1,6 +1,9 @@
-import type {
-    OutputFailureCode,
-    OutputFailureStage,
+import {
+    SHARE_REJECTION_MESSAGES,
+    type OutputFailureCode,
+    type OutputFailureStage,
+    type ShareRejectionReason,
+    type SourceFailureCode,
 } from "@homeworkcopy/contracts";
 
 export class AppError extends Error {
@@ -122,6 +125,61 @@ export class OutputNotEditableError extends AppError {
     constructor(message: string) {
         super(409, "OUTPUT_NOT_EDITABLE", message);
         this.name = "OutputNotEditableError";
+    }
+}
+
+/**
+ * An invitation or share link that could not be redeemed.
+ *
+ * The reason doubles as the error code, so a client renders the matching copy
+ * from `SHARE_REJECTION_MESSAGES` without parsing prose.
+ */
+export class ShareRejectedError extends AppError {
+    constructor(public readonly reason: ShareRejectionReason) {
+        super(
+            SHARE_REJECTION_STATUS[reason],
+            reason,
+            SHARE_REJECTION_MESSAGES[reason],
+        );
+        this.name = "ShareRejectedError";
+    }
+}
+
+/**
+ * `410 Gone` for links that were once real, `404` for tokens that never were.
+ *
+ * A token is 256 bits of randomness, so distinguishing these cannot help anyone
+ * guess one, and telling a genuine invitee that their link expired rather than
+ * that it never existed is the difference between a fixable problem and a
+ * mystery.
+ */
+const SHARE_REJECTION_STATUS: Record<ShareRejectionReason, number> = {
+    INVALID: 404,
+    EXPIRED: 410,
+    REVOKED: 410,
+    WRONG_ACCOUNT: 403,
+    ALREADY_MEMBER: 409,
+    NOTEBOOK_FULL: 409,
+};
+
+/**
+ * A source that could not be extracted, carrying why.
+ *
+ * The code is passed straight through to `AppError.code`, because this error
+ * crosses an Inngest step boundary: the object the outer handler catches is a
+ * rehydrated `Error`, not this instance, so `instanceof` is false by the time
+ * anyone asks. Inngest rebuilds errors from `name`, `message`, `stack`, `cause`,
+ * and `code` only — any other property is dropped in transit — so `code` is the
+ * one field a classification can ride on and still arrive.
+ */
+export class SourceExtractionError extends AppError {
+    constructor(
+        failureCode: SourceFailureCode,
+        /** Safe to show a reader: authored here, never a provider payload. */
+        message: string,
+    ) {
+        super(422, failureCode, message);
+        this.name = "SourceExtractionError";
     }
 }
 

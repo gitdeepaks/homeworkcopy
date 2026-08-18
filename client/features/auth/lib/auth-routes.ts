@@ -7,6 +7,9 @@ export const authRoutes = {
 export const protectedRoutes = [
     authRoutes.dashboard,
     "/workspace",
+    "/settings",
+    "/invite",
+    "/share",
 ] as const;
 
 export const unauthenticatedRoutes = [authRoutes.login] as const;

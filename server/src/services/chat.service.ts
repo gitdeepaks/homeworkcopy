@@ -75,7 +75,11 @@ import {
     getLastUserMessageText,
     getTextFromUIMessage,
 } from "../utils/chat-message.js";
-import { getWorkspaceByIdForUser } from "./workspace.service.js";
+import { recordAuditEvent } from "./audit.service.js";
+import {
+    authorizeNotebook,
+    type Actor,
+} from "./notebook-access.service.js";
 import { resolveReadySourcesForWorkspace } from "./source.service.js";
 import {
     RETRIEVAL_VERSION,
@@ -115,7 +119,7 @@ export async function listConversationsForWorkspace(
     workspaceId: string,
     userId: string,
 ) {
-    await getWorkspaceByIdForUser(workspaceId, userId);
+    await authorizeNotebook(workspaceId, userId, "notebook:read");
     return findConversationsByWorkspaceId(workspaceId);
 }
 
@@ -136,7 +140,7 @@ export async function createConversationForWorkspace(
     userId: string,
     title?: string,
 ) {
-    await getWorkspaceByIdForUser(workspaceId, userId);
+    await authorizeNotebook(workspaceId, userId, "conversation:manage");
     return createConversationRecord(workspaceId, title);
 }
 
@@ -155,7 +159,7 @@ export async function getConversationMessagesForWorkspace(
     conversationId: string,
     userId: string,
 ) {
-    await getWorkspaceByIdForUser(workspaceId, userId);
+    await authorizeNotebook(workspaceId, userId, "notebook:read");
 
     const conversation = await findConversationByIdAndWorkspaceId(
         conversationId,
@@ -238,9 +242,9 @@ export async function getConversationMessagesForWorkspace(
 export async function deleteConversationForWorkspace(
     workspaceId: string,
     conversationId: string,
-    userId: string,
+    actor: Actor,
 ) {
-    await getWorkspaceByIdForUser(workspaceId, userId);
+    await authorizeNotebook(workspaceId, actor.id, "conversation:manage");
 
     const conversation = await findConversationByIdAndWorkspaceId(
         conversationId,
@@ -251,6 +255,18 @@ export async function deleteConversationForWorkspace(
         throw new NotFoundError("Conversation not found");
     }
 
+    await recordAuditEvent({
+        workspaceId,
+        type: "CONVERSATION_DELETED",
+        actor,
+        context: {
+            targetResourceId: conversationId,
+            ...(conversation.title === null
+                ? {}
+                : { targetTitle: conversation.title }),
+        },
+    });
+
     await deleteConversationRecord(conversationId);
 }
 
@@ -260,7 +276,7 @@ export async function renameConversationForWorkspace(
     userId: string,
     title: string,
 ) {
-    await getWorkspaceByIdForUser(workspaceId, userId);
+    await authorizeNotebook(workspaceId, userId, "conversation:manage");
     const conversation = await findConversationByIdAndWorkspaceId(
         conversationId,
         workspaceId,
@@ -276,7 +292,7 @@ export async function setMessageFeedbackForWorkspace(
     userId: string,
     feedback: MessageFeedback,
 ) {
-    await getWorkspaceByIdForUser(workspaceId, userId);
+    await authorizeNotebook(workspaceId, userId, "conversation:manage");
     const conversation = await findConversationByIdAndWorkspaceId(
         conversationId,
         workspaceId,
@@ -291,7 +307,7 @@ export async function saveMessageAsOutputForWorkspace(
     messageId: string,
     userId: string,
 ) {
-    await getWorkspaceByIdForUser(workspaceId, userId);
+    await authorizeNotebook(workspaceId, userId, "output:create");
     const conversation = await findConversationByIdAndWorkspaceId(
         conversationId,
         workspaceId,
@@ -449,7 +465,11 @@ export async function streamWorkspaceChat(
     },
 ) {
     validateChatMessageLengths(input.messages);
-    const workspace = await getWorkspaceByIdForUser(workspaceId, userId);
+    const { workspace } = await authorizeNotebook(
+        workspaceId,
+        userId,
+        "chat:write",
+    );
     const requestedModel = input.model ?? workspace.defaultModel;
     const chatModel =
         CHAT_MODELS.find((model) => model === requestedModel) ?? CHAT_MODEL;

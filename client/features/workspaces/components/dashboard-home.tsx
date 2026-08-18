@@ -3,23 +3,18 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import type { NotebookScope } from "@homeworkcopy/contracts";
 import {
     BookOpenIcon,
     MessageSquareIcon,
     SearchIcon,
     SparklesIcon,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-    Empty,
-    EmptyContent,
-    EmptyDescription,
-    EmptyHeader,
-    EmptyTitle,
-} from "@/components/ui/empty";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AccountMenu } from "@/features/auth/components/account-menu";
+import { LeaveNotebookDialog } from "@/features/collaboration/components/leave-notebook-dialog";
+import { useLeaveNotebook } from "@/features/collaboration/hooks/use-sharing";
 import { ApiError } from "@/shared/lib/api";
 import { useDebouncedValue } from "@/shared/hooks/use-debounced-value";
 import {
@@ -30,9 +25,8 @@ import {
 } from "../hooks/use-workspaces";
 import { workspaceRoutes } from "../lib/routes";
 import type { Workspace } from "../lib/types";
-import { CreateWorkspaceCard } from "./create-workspace-card";
 import { DeleteWorkspaceDialog } from "./delete-workspace-dialog";
-import { WorkspaceCard } from "./workspace-card";
+import { NotebookGrid } from "./notebook-grid";
 import { WorkspaceFormDialog } from "./workspace-form-dialog";
 
 type DashboardHomeProps = {
@@ -53,54 +47,78 @@ const FEATURES = [
     {
         icon: SparklesIcon,
         title: "Create outputs",
-        description: "Build flashcards, quizzes, mind maps, and summaries in Studio",
+        description:
+            "Build flashcards, quizzes, mind maps, and summaries in Studio",
     },
 ] as const;
 
+const SCOPES: readonly { value: NotebookScope; label: string }[] = [
+    { value: "mine", label: "Mine" },
+    { value: "shared", label: "Shared with me" },
+];
+
+/**
+ * Filters a tab's notebooks by the search box.
+ *
+ * The owner's name is searchable on shared notebooks, because "the one Ada
+ * shared" is how people remember someone else's notebook.
+ */
+function filterNotebooks(
+    notebooks: Workspace[] | undefined,
+    query: string,
+): Workspace[] {
+    if (!notebooks) return [];
+
+    const needle = query.trim().toLowerCase();
+    if (!needle) return notebooks;
+
+    return notebooks.filter((notebook) =>
+        [notebook.title, notebook.description ?? "", notebook.ownerName]
+            .join(" ")
+            .toLowerCase()
+            .includes(needle),
+    );
+}
+
 export function DashboardHome({ userName }: DashboardHomeProps) {
     const router = useRouter();
-    const { data: workspaces, isLoading, error } = useWorkspaces();
-    const createWorkspace = useCreateWorkspace();
+    const [scope, setScope] = useState<NotebookScope>("mine");
     const [search, setSearch] = useState("");
     const debouncedSearch = useDebouncedValue(search, 200);
 
+    const mine = useWorkspaces("mine");
+    const shared = useWorkspaces("shared");
+    const active = scope === "mine" ? mine : shared;
+
+    const createWorkspace = useCreateWorkspace();
     const [createOpen, setCreateOpen] = useState(false);
     const [editingWorkspace, setEditingWorkspace] = useState<Workspace | null>(
         null,
     );
     const [deletingWorkspace, setDeletingWorkspace] =
         useState<Workspace | null>(null);
+    const [leavingWorkspace, setLeavingWorkspace] = useState<Workspace | null>(
+        null,
+    );
 
     const updateWorkspace = useUpdateWorkspace(editingWorkspace?.id ?? "");
     const deleteWorkspace = useDeleteWorkspace();
+    const leaveNotebook = useLeaveNotebook(leavingWorkspace?.id ?? "");
 
-    const filteredWorkspaces = useMemo(() => {
-        if (!workspaces) {
-            return [];
-        }
-
-        const query = debouncedSearch.trim().toLowerCase();
-        if (!query) {
-            return workspaces;
-        }
-
-        return workspaces.filter((workspace) => {
-            const haystack = [
-                workspace.title,
-                workspace.description ?? "",
-            ]
-                .join(" ")
-                .toLowerCase();
-
-            return haystack.includes(query);
-        });
-    }, [workspaces, debouncedSearch]);
+    const filtered = useMemo(
+        () => filterNotebooks(active.data, debouncedSearch),
+        [active.data, debouncedSearch],
+    );
 
     const greeting = userName?.split(" ")[0] ?? "there";
+    const sharedCount = shared.data?.length ?? 0;
 
     return (
         <div className="notebook-canvas min-h-svh">
-            <header data-print-hidden className="sticky top-0 z-20 border-b bg-paper/90 backdrop-blur-md">
+            <header
+                data-print-hidden
+                className="sticky top-0 z-20 border-b bg-paper/90 backdrop-blur-md"
+            >
                 <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-4 px-4 md:px-8">
                     <Link
                         href={workspaceRoutes.list}
@@ -113,7 +131,10 @@ export function DashboardHome({ userName }: DashboardHomeProps) {
                 </div>
             </header>
 
-            <main id="main-content" className="mx-auto max-w-6xl px-4 py-8 md:px-8 md:py-10">
+            <main
+                id="main-content"
+                className="mx-auto max-w-6xl px-4 py-8 md:px-8 md:py-10"
+            >
                 <section className="mb-10 space-y-6">
                     <div className="space-y-2">
                         <p className="font-heading text-xl font-medium text-primary">
@@ -146,92 +167,72 @@ export function DashboardHome({ userName }: DashboardHomeProps) {
                     </div>
                 </section>
 
-                <section className="space-y-5">
+                <Tabs
+                    value={scope}
+                    onValueChange={(value) => {
+                        // The tab list is a fixed pair, so anything else is a
+                        // stray event rather than a scope worth honouring.
+                        if (value === "mine" || value === "shared") {
+                            setScope(value);
+                        }
+                    }}
+                    className="space-y-5"
+                >
                     <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
-                            <h2 className="font-heading text-xl font-semibold">
-                                Recent notebooks
-                            </h2>
-                            <p className="text-sm text-muted-foreground">
-                                {workspaces?.length
-                                    ? `${workspaces.length} notebook${workspaces.length === 1 ? "" : "s"}`
-                                    : "Start with your first notebook"}
-                            </p>
-                        </div>
+                        <TabsList aria-label="Notebook scope">
+                            {SCOPES.map((option) => (
+                                <TabsTrigger
+                                    key={option.value}
+                                    value={option.value}
+                                    className="min-h-11 px-4"
+                                >
+                                    {option.label}
+                                    {option.value === "shared" &&
+                                    sharedCount > 0 ? (
+                                        <span className="ml-1 text-xs text-muted-foreground">
+                                            {sharedCount}
+                                        </span>
+                                    ) : null}
+                                </TabsTrigger>
+                            ))}
+                        </TabsList>
 
                         <div className="relative w-full sm:max-w-xs">
-                            <SearchIcon className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+                            <SearchIcon
+                                aria-hidden
+                                className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+                            />
                             <Input
                                 value={search}
                                 onChange={(event) =>
                                     setSearch(event.target.value)
                                 }
                                 placeholder="Search notebooks..."
+                                aria-label="Search notebooks"
                                 className="rounded-full bg-background pl-9"
                             />
                         </div>
                     </div>
 
-                    {isLoading ? (
-                        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                            {Array.from({ length: 6 }).map((_, index) => (
-                                <Skeleton
-                                    key={index}
-                                    className="min-h-[196px] rounded-3xl"
-                                />
-                            ))}
-                        </div>
-                    ) : error ? (
-                        <Empty className="rounded-3xl border bg-card">
-                            <EmptyHeader>
-                                <EmptyTitle>
-                                    Could not load notebooks
-                                </EmptyTitle>
-                                <EmptyDescription>
-                                    {error instanceof ApiError
-                                        ? error.message
-                                        : "Please try again in a moment."}
-                                </EmptyDescription>
-                            </EmptyHeader>
-                        </Empty>
-                    ) : (
-                        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                            <CreateWorkspaceCard
-                                onClick={() => setCreateOpen(true)}
+                    {SCOPES.map((option) => (
+                        <TabsContent key={option.value} value={option.value}>
+                            <NotebookGrid
+                                scope={option.value}
+                                notebooks={
+                                    option.value === scope ? filtered : []
+                                }
+                                isLoading={active.isLoading}
+                                error={active.error}
+                                searchQuery={debouncedSearch}
+                                onCreate={() => setCreateOpen(true)}
+                                onClearSearch={() => setSearch("")}
+                                onEdit={setEditingWorkspace}
+                                onDelete={setDeletingWorkspace}
+                                onLeave={setLeavingWorkspace}
                             />
-
-                            {filteredWorkspaces.map((workspace) => (
-                                <WorkspaceCard
-                                    key={workspace.id}
-                                    workspace={workspace}
-                                    onEdit={setEditingWorkspace}
-                                    onDelete={setDeletingWorkspace}
-                                />
-                            ))}
-                        </div>
-                    )}
-
-                    {!isLoading &&
-                    !error &&
-                    workspaces &&
-                    workspaces.length > 0 &&
-                    filteredWorkspaces.length === 0 ? (
-                        <Empty className="rounded-3xl border bg-card">
-                            <EmptyHeader>
-                                <EmptyTitle>No notebooks found</EmptyTitle>
-                                <EmptyDescription>
-                                    Try a different search term or create a new
-                                    notebook.
-                                </EmptyDescription>
-                            </EmptyHeader>
-                            <EmptyContent>
-                                <Button onClick={() => setSearch("")}>
-                                    Clear search
-                                </Button>
-                            </EmptyContent>
-                        </Empty>
-                    ) : null}
-                </section>
+                        </TabsContent>
+                    ))}
+                </Tabs>
             </main>
 
             <WorkspaceFormDialog
@@ -275,6 +276,39 @@ export function DashboardHome({ userName }: DashboardHomeProps) {
 
                     await deleteWorkspace.mutateAsync(deletingWorkspace.id);
                     setDeletingWorkspace(null);
+                }}
+            />
+
+            <LeaveNotebookDialog
+                notebookTitle={leavingWorkspace?.title ?? null}
+                open={Boolean(leavingWorkspace)}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        setLeavingWorkspace(null);
+                        leaveNotebook.reset();
+                    }
+                }}
+                isPending={leaveNotebook.isPending}
+                error={
+                    leaveNotebook.error instanceof ApiError
+                        ? leaveNotebook.error.message
+                        : null
+                }
+                onConfirm={async () => {
+                    if (!leavingWorkspace) {
+                        return;
+                    }
+
+                    // The dialog stays open on failure so the reason is
+                    // readable and the action is still retryable.
+                    const left = await leaveNotebook
+                        .mutateAsync()
+                        .then(() => true)
+                        .catch(() => false);
+
+                    if (left) {
+                        setLeavingWorkspace(null);
+                    }
                 }}
             />
         </div>

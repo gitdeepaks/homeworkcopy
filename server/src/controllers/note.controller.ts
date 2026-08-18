@@ -12,6 +12,7 @@ import {
     updateNoteSchema,
 } from "../validators/note.validator.js";
 import { workspaceIdParamSchema } from "../validators/workspace.validator.js";
+import { actorOf } from "../utils/actor.js";
 
 export async function listNotes(req: Request, res: Response) {
     const { workspaceId } = workspaceIdParamSchema.parse(req.params);
@@ -54,6 +55,6 @@ export async function updateNote(req: Request, res: Response) {
 
 export async function deleteNote(req: Request, res: Response) {
     const { workspaceId, noteId } = noteIdParamSchema.parse(req.params);
-    await deleteNoteForWorkspace(workspaceId, noteId, req.session.user.id);
+    await deleteNoteForWorkspace(workspaceId, noteId, actorOf(req));
     res.status(204).send();
 }
