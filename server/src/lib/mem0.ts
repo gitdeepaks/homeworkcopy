@@ -5,14 +5,14 @@ import { NotFoundError } from "../types/app-error.js";
 
 let client: MemoryClient | null = null;
 const providerMemorySchema = z.object({
-    id: z.string().min(1),
-    memory: z.string().optional(),
-    data: z.object({ memory: z.string() }).nullable().optional(),
-    userId: z.string().min(1).optional(),
-    createdAt: z.union([z.date(), z.string()]).optional(),
-    updatedAt: z.union([z.date(), z.string()]).optional(),
-    metadata: z.record(z.string(), z.unknown()).nullable().optional(),
-    categories: z.array(z.string()).optional(),
+  id: z.string().min(1),
+  memory: z.string().optional(),
+  data: z.object({ memory: z.string() }).nullable().optional(),
+  userId: z.string().min(1).optional(),
+  createdAt: z.union([z.date(), z.string()]).optional(),
+  updatedAt: z.union([z.date(), z.string()]).optional(),
+  metadata: z.record(z.string(), z.unknown()).nullable().optional(),
+  categories: z.array(z.string()).optional(),
 });
 
 /**
@@ -22,34 +22,34 @@ const providerMemorySchema = z.object({
  * @throws When `MEM0_API_KEY` is missing
  */
 export function getMem0Client() {
-    const apiKey = process.env.MEM0_API_KEY?.trim();
+  const apiKey = process.env.MEM0_API_KEY?.trim();
 
-    if (!apiKey) {
-        throw new Error("MEM0_API_KEY is not configured");
-    }
+  if (!apiKey) {
+    throw new Error("MEM0_API_KEY is not configured");
+  }
 
-    if (!client) {
-        client = new MemoryClient({ apiKey });
-    }
+  if (!client) {
+    client = new MemoryClient({ apiKey });
+  }
 
-    return client;
+  return client;
 }
 
 /** Message shape accepted by Mem0 for inferred memory extraction. */
 export type Mem0Message = {
-    role: "user" | "assistant";
-    content: string;
+  role: "user" | "assistant";
+  content: string;
 };
 
 /** Normalized memory record returned by Homeworkcopy memory APIs. */
 export type AppMemory = {
-    id: string;
-    memory: string;
-    createdAt: string;
-    updatedAt: string;
-    metadata?: Record<string, unknown> | null;
-    categories?: string[];
-    source: "manual" | "learned";
+  id: string;
+  memory: string;
+  createdAt: string;
+  updatedAt: string;
+  metadata?: Record<string, unknown> | null;
+  categories?: string[];
+  source: "manual" | "learned";
 };
 
 /**
@@ -59,34 +59,32 @@ export type AppMemory = {
  * @returns Normalized memory with `source` derived from metadata
  */
 function mapMemory(value: unknown): AppMemory {
-    const record = providerMemorySchema.parse(value);
-    const metadata = record.metadata ?? null;
-    const source: AppMemory["source"] =
-        metadata?.source === "manual" ? "manual" : "learned";
-    const createdAt = record.createdAt ?? new Date().toISOString();
-    const updatedAt = record.updatedAt ?? createdAt;
+  const record = providerMemorySchema.parse(value);
+  const metadata = record.metadata ?? null;
+  const source: AppMemory["source"] =
+    metadata?.source === "manual" ? "manual" : "learned";
+  const createdAt = record.createdAt ?? new Date().toISOString();
+  const updatedAt = record.updatedAt ?? createdAt;
 
-    return {
-        id: record.id,
-        memory: record.memory ?? record.data?.memory ?? "",
-        createdAt:
-            createdAt instanceof Date ? createdAt.toISOString() : createdAt,
-        updatedAt:
-            updatedAt instanceof Date ? updatedAt.toISOString() : updatedAt,
-        metadata,
-        categories: record.categories,
-        source,
-    };
+  return {
+    id: record.id,
+    memory: record.memory ?? record.data?.memory ?? "",
+    createdAt: createdAt instanceof Date ? createdAt.toISOString() : createdAt,
+    updatedAt: updatedAt instanceof Date ? updatedAt.toISOString() : updatedAt,
+    metadata,
+    categories: record.categories,
+    source,
+  };
 }
 
 async function assertMemoryOwnership(userId: string, memoryId: string) {
-    const value: unknown = await withTimeout(
-        "Mem0 memory lookup",
-        10_000,
-        getMem0Client().get(memoryId),
-    );
-    const memory = providerMemorySchema.parse(value);
-    if (memory.userId !== userId) throw new NotFoundError("Memory not found");
+  const value: unknown = await withTimeout(
+    "Mem0 memory lookup",
+    10_000,
+    getMem0Client().get(memoryId),
+  );
+  const memory = providerMemorySchema.parse(value);
+  if (memory.userId !== userId) throw new NotFoundError("Memory not found");
 }
 
 /**
@@ -97,17 +95,21 @@ async function assertMemoryOwnership(userId: string, memoryId: string) {
  *
  */
 export async function listUserMemories(userId: string) {
-    if (!process.env.MEM0_API_KEY?.trim()) {
-        return [];
-    }
+  if (!process.env.MEM0_API_KEY?.trim()) {
+    return [];
+  }
 
-    const page = await withTimeout("Mem0 memory list", 10_000, getMem0Client().getAll({
-        filters: { user_id: userId },
-        page: 1,
-        pageSize: 100,
-    }));
+  const page = await withTimeout(
+    "Mem0 memory list",
+    10_000,
+    getMem0Client().getAll({
+      filters: { user_id: userId },
+      page: 1,
+      pageSize: 100,
+    }),
+  );
 
-    return page.results.map(mapMemory);
+  return page.results.map(mapMemory);
 }
 
 /**
@@ -119,17 +121,21 @@ export async function listUserMemories(userId: string) {
  *
  */
 export async function searchUserMemories(userId: string, query: string) {
-    if (!process.env.MEM0_API_KEY?.trim() || !query.trim()) {
-        return [];
-    }
+  if (!process.env.MEM0_API_KEY?.trim() || !query.trim()) {
+    return [];
+  }
 
-    const results = await withTimeout("Mem0 memory search", 10_000, getMem0Client().search(query, {
-        filters: { user_id: userId },
-        topK: 8,
-        threshold: 0.1,
-    }));
+  const results = await withTimeout(
+    "Mem0 memory search",
+    10_000,
+    getMem0Client().search(query, {
+      filters: { user_id: userId },
+      topK: 8,
+      threshold: 0.1,
+    }),
+  );
 
-    return results.results.map(mapMemory);
+  return results.results.map(mapMemory);
 }
 
 /**
@@ -142,28 +148,29 @@ export async function searchUserMemories(userId: string, query: string) {
  *
  */
 export async function addUserMemory(
-    userId: string,
-    input: {
-        memory: string;
-        infer?: boolean;
-        metadata?: Record<string, unknown>;
-    },
+  userId: string,
+  input: {
+    memory: string;
+    infer?: boolean;
+    metadata?: Record<string, unknown>;
+  },
 ) {
-    const created = await withTimeout("Mem0 memory create", 15_000, getMem0Client().add(
-        [{ role: "user", content: input.memory }],
-        {
-            userId,
-            infer: input.infer ?? false,
-            metadata: input.metadata,
-        },
-    ));
+  const created = await withTimeout(
+    "Mem0 memory create",
+    15_000,
+    getMem0Client().add([{ role: "user", content: input.memory }], {
+      userId,
+      infer: input.infer ?? false,
+      metadata: input.metadata,
+    }),
+  );
 
-    const first = created[0];
-    if (!first) {
-        throw new Error("Mem0 did not return a created memory");
-    }
+  const first = created[0];
+  if (!first) {
+    throw new Error("Mem0 did not return a created memory");
+  }
 
-    return mapMemory(first);
+  return mapMemory(first);
 }
 
 /**
@@ -176,19 +183,23 @@ export async function addUserMemory(
  *
  */
 export async function addMemoriesFromMessages(
-    userId: string,
-    messages: Mem0Message[],
-    metadata?: Record<string, unknown>,
+  userId: string,
+  messages: Mem0Message[],
+  metadata?: Record<string, unknown>,
 ) {
-    if (!process.env.MEM0_API_KEY?.trim() || messages.length === 0) {
-        return;
-    }
+  if (!process.env.MEM0_API_KEY?.trim() || messages.length === 0) {
+    return;
+  }
 
-    await withTimeout("Mem0 memory extraction", 15_000, getMem0Client().add(messages, {
-        userId,
-        infer: true,
-        metadata,
-    }));
+  await withTimeout(
+    "Mem0 memory extraction",
+    15_000,
+    getMem0Client().add(messages, {
+      userId,
+      infer: true,
+      metadata,
+    }),
+  );
 }
 
 /**
@@ -201,21 +212,25 @@ export async function addMemoriesFromMessages(
  *
  */
 export async function updateUserMemory(
-    userId: string,
-    memoryId: string,
-    input: { memory: string },
+  userId: string,
+  memoryId: string,
+  input: { memory: string },
 ) {
-    await assertMemoryOwnership(userId, memoryId);
-    const updated = await withTimeout("Mem0 memory update", 10_000, getMem0Client().update(memoryId, {
-        text: input.memory,
-    }));
+  await assertMemoryOwnership(userId, memoryId);
+  const updated = await withTimeout(
+    "Mem0 memory update",
+    10_000,
+    getMem0Client().update(memoryId, {
+      text: input.memory,
+    }),
+  );
 
-    const first = updated[0];
-    if (!first) {
-        throw new Error("Mem0 did not return an updated memory");
-    }
+  const first = updated[0];
+  if (!first) {
+    throw new Error("Mem0 did not return an updated memory");
+  }
 
-    return mapMemory(first);
+  return mapMemory(first);
 }
 
 /**
@@ -226,6 +241,10 @@ export async function updateUserMemory(
  *
  */
 export async function deleteUserMemory(userId: string, memoryId: string) {
-    await assertMemoryOwnership(userId, memoryId);
-    await withTimeout("Mem0 memory delete", 10_000, getMem0Client().delete(memoryId));
+  await assertMemoryOwnership(userId, memoryId);
+  await withTimeout(
+    "Mem0 memory delete",
+    10_000,
+    getMem0Client().delete(memoryId),
+  );
 }
