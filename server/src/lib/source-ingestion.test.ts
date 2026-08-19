@@ -6,6 +6,8 @@ import {
     enforceExtractedContentLimits,
     enforceNotebookIngestionLimits,
     getSafeProcessingFailure,
+    hasTranscribableSpeech,
+    mergeTranscriptWindows,
     sourceChunkId,
     verifyAudioUpload,
     verifyPdfUpload,
@@ -231,5 +233,136 @@ describe("getSafeProcessingFailure", () => {
         expect(failure.code).toBe("EXTRACTION_FAILED");
         expect(failure.message).toBe("Source extraction failed. Retry the import.");
         expect(failure.message).not.toContain("sk-live-secret");
+    });
+});
+
+describe("mergeTranscriptWindows", () => {
+    test("shifts every window's segments onto the recording's timeline", () => {
+        const merged = mergeTranscriptWindows([
+            {
+                startSeconds: 0,
+                text: "first half",
+                segments: [
+                    { text: "first", offset: 0, duration: 1 },
+                    { text: "half", offset: 1, duration: 1 },
+                ],
+            },
+            {
+                startSeconds: 1_200,
+                text: "second half",
+                segments: [
+                    { text: "second", offset: 0, duration: 1 },
+                    { text: "half", offset: 2.5, duration: 1 },
+                ],
+            },
+        ]);
+
+        expect(merged.text).toBe("first half second half");
+        expect(merged.segments.map((segment) => segment.offset)).toEqual([
+            0, 1, 1_200, 1_202.5,
+        ]);
+    });
+
+    test("keeps each segment's own duration untouched", () => {
+        const merged = mergeTranscriptWindows([
+            {
+                startSeconds: 60,
+                text: "only",
+                segments: [{ text: "only", offset: 3, duration: 4.25 }],
+            },
+        ]);
+
+        expect(merged.segments).toEqual([
+            { text: "only", offset: 63, duration: 4.25 },
+        ]);
+    });
+
+    test("rounds a shifted offset to the millisecond so drift cannot accumulate", () => {
+        const merged = mergeTranscriptWindows([
+            {
+                startSeconds: 0.1,
+                text: "drift",
+                segments: [{ text: "drift", offset: 0.2, duration: 1 }],
+            },
+        ]);
+
+        expect(merged.segments[0]?.offset).toBe(0.3);
+    });
+
+    test("a window that transcribed to nothing adds no stray whitespace", () => {
+        const merged = mergeTranscriptWindows([
+            { startSeconds: 0, text: "spoken", segments: [] },
+            { startSeconds: 1_200, text: "   ", segments: [] },
+            { startSeconds: 2_400, text: "again", segments: [] },
+        ]);
+
+        expect(merged.text).toBe("spoken again");
+    });
+
+    test("an empty recording merges to nothing rather than throwing", () => {
+        expect(mergeTranscriptWindows([])).toEqual({ text: "", segments: [] });
+    });
+
+    test("preserves playback order across windows", () => {
+        const merged = mergeTranscriptWindows([
+            {
+                startSeconds: 0,
+                text: "a b",
+                segments: [
+                    { text: "a", offset: 0, duration: 1 },
+                    { text: "b", offset: 1, duration: 1 },
+                ],
+            },
+            {
+                startSeconds: 10,
+                text: "c",
+                segments: [{ text: "c", offset: 0, duration: 1 }],
+            },
+        ]);
+
+        const offsets = merged.segments.map((segment) => segment.offset);
+        expect(offsets).toEqual([...offsets].sort((a, b) => a - b));
+        expect(merged.segments.map((segment) => segment.text)).toEqual([
+            "a",
+            "b",
+            "c",
+        ]);
+    });
+});
+
+describe("hasTranscribableSpeech", () => {
+    test("accepts ordinary speech", () => {
+        expect(hasTranscribableSpeech("All right, so here we are")).toBe(true);
+    });
+
+    test("rejects a transcript that is only musical cues", () => {
+        // What Whisper actually returns for a film with a score and no dialogue.
+        expect(hasTranscribableSpeech("\u266a\u266a \u266a\u266a \u266a\u266a \u266a\u266a")).toBe(false);
+    });
+
+    test("rejects a transcript that is only bracketed sound cues", () => {
+        expect(hasTranscribableSpeech("[Music] [Applause] [Music]")).toBe(false);
+        expect(hasTranscribableSpeech("(gentle music) (birds chirping)")).toBe(false);
+    });
+
+    test("keeps a transcript where speech is mixed among the cues", () => {
+        expect(
+            hasTranscribableSpeech("[Music] Welcome to the show [Applause]"),
+        ).toBe(true);
+    });
+
+    test("rejects whitespace and punctuation alone", () => {
+        expect(hasTranscribableSpeech("")).toBe(false);
+        expect(hasTranscribableSpeech("   ")).toBe(false);
+        expect(hasTranscribableSpeech("... --- ...")).toBe(false);
+    });
+
+    test("accepts speech in a non-Latin script", () => {
+        expect(hasTranscribableSpeech("\u0928\u092e\u0938\u094d\u0924\u0947")).toBe(true);
+        expect(hasTranscribableSpeech("\u3053\u3093\u306b\u3061\u306f")).toBe(true);
+    });
+
+    test("accepts a transcript that is only numbers", () => {
+        expect(hasTranscribableSpeech("3 2 1")).toBe(true);
     });
 });

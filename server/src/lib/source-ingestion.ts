@@ -10,6 +10,7 @@ import {
     SOURCE_UPLOAD_MAX_BYTES,
     sourceFailureCodeSchema,
     type SourceFailureCode,
+    type TranscriptSegment,
 } from "@homeworkcopy/contracts";
 import { ConflictError, ValidationError } from "../types/app-error.js";
 
@@ -133,6 +134,84 @@ export function verifyAudioUpload(file: Express.Multer.File): {
     }
 
     return { format: signature.format };
+}
+
+/**
+ * One transcribed slice of a longer recording.
+ *
+ * A recording too large for a transcription provider is split before it is sent,
+ * and each slice comes back with timestamps relative to its own start.
+ */
+export type TranscriptWindow = {
+    /** Seconds from the start of the recording at which this window begins. */
+    startSeconds: number;
+    text: string;
+    segments: readonly TranscriptSegment[];
+};
+
+/**
+ * Rejoins the transcripts of a split recording into one.
+ *
+ * Every segment is shifted by its window's start, so a citation still points at
+ * the moment in the original recording that supports it rather than at an offset
+ * into a slice nobody can see. Offsets are rounded to the millisecond, because
+ * accumulated float error is noise a reader would eventually notice as drift.
+ *
+ * @param windows - Transcribed windows in playback order
+ * @returns The joined text and the segments on the recording's own timeline
+ */
+export function mergeTranscriptWindows(windows: readonly TranscriptWindow[]): {
+    text: string;
+    segments: TranscriptSegment[];
+} {
+    const segments: TranscriptSegment[] = [];
+    const texts: string[] = [];
+
+    for (const window of windows) {
+        const text = window.text.trim();
+        if (text) texts.push(text);
+
+        for (const segment of window.segments) {
+            segments.push({
+                text: segment.text,
+                offset: roundToMilliseconds(segment.offset + window.startSeconds),
+                duration: segment.duration,
+            });
+        }
+    }
+
+    return { text: texts.join(" ").trim(), segments };
+}
+
+function roundToMilliseconds(seconds: number): number {
+    return Math.round(seconds * 1_000) / 1_000;
+}
+
+/**
+ * Markers a transcriber emits for sound it heard but could not read as speech.
+ *
+ * Musical notes, and the bracketed or parenthesised cues both Whisper and
+ * YouTube's own captioner use — `[Music]`, `(applause)`, `(speaking in the
+ * distance)`.
+ */
+const NON_LEXICAL_CUE = /[\u266a\u266b\u266c]+|\[[^\]]*\]|\([^)]*\)/gu;
+
+/**
+ * Whether a transcript carries speech rather than only sound cues.
+ *
+ * A transcriber handed music or ambience does not return nothing — it returns
+ * pages of cue markers. Indexed, such a source answers no question and only
+ * dilutes retrieval, so it is treated as having no content at all.
+ *
+ * Only a transcript that is *entirely* cues is rejected. A single word of real
+ * speech among them is enough to keep the source, because the cues cost little
+ * and the speech may be exactly what someone asks about.
+ *
+ * @param text - Full transcript text
+ * @returns Whether anything readable survives once the cues are removed
+ */
+export function hasTranscribableSpeech(text: string): boolean {
+    return /\p{L}|\p{N}/u.test(text.replace(NON_LEXICAL_CUE, " "));
 }
 
 export function enforceExtractedContentLimits(

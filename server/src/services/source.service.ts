@@ -6,6 +6,7 @@ import {
     storeSourceAudioObject,
 } from "../lib/audio-storage.js";
 import { getSpeechToTextProvider } from "../lib/stt/index.js";
+import { parseYoutubeVideoId } from "../lib/youtube.js";
 import { deleteCloudinaryObject, uploadPdfToCloudinary } from "../lib/cloudinary.js";
 import { enqueueSourceDeletion, enqueueSourceProcessing } from "../lib/source-events.js";
 import { logger } from "../lib/logger.js";
@@ -456,9 +457,7 @@ export async function importYoutubeSource(
 ) {
     await authorizeNotebook(workspaceId, userId, "source:create");
     const url = canonicalizeSourceUrl(input.url);
-    const videoId = url.match(
-        /(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([\w-]{11})/,
-    )?.[1];
+    const videoId = parseYoutubeVideoId(url);
     if (!videoId) throw new ConflictError("YouTube video identifier could not be resolved");
 
     return createAndProcessSource({

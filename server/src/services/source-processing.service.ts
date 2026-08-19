@@ -26,15 +26,26 @@ import { createSignedSourceAudioUrl } from "../lib/audio-storage.js";
 import { chunkPages, chunkText } from "../lib/chunking.js";
 import { embedTexts } from "../lib/openai.js";
 import { getSpeechToTextProvider } from "../lib/stt/index.js";
-import { ValidationError } from "../types/app-error.js";
+import { SourceExtractionError, ValidationError } from "../types/app-error.js";
 import { extractPdfFromCloudinary } from "../lib/pdf.js";
 import { scrapeWebsite } from "../lib/firecrawl.js";
-import { fetchYoutubeTranscript } from "../lib/youtube.js";
+import {
+    captionsUnavailableFailure,
+    fetchYoutubeTranscript,
+} from "../lib/youtube.js";
+import {
+    isYoutubeAudioFallbackEnabled,
+    readWindowBytes,
+    withYoutubeAudio,
+} from "../lib/youtube-audio.js";
 import { logger } from "../lib/logger.js";
 import {
     enforceExtractedContentLimits,
     getSafeProcessingFailure,
+    hasTranscribableSpeech,
+    mergeTranscriptWindows,
     sourceChunkId,
+    type TranscriptWindow,
 } from "../lib/source-ingestion.js";
 import {
     deleteSourceVectors,
@@ -120,6 +131,94 @@ async function transcribeStoredAudio(
     }
 
     return { ...transcript, provider: provider.id };
+}
+
+/**
+ * Transcribes a caption-less YouTube video from its audio.
+ *
+ * Reached only once the caption path has confirmed there is nothing to read, so
+ * a video that publishes captions never costs a transcription request. The audio
+ * arrives as windows because a long recording exceeds what a provider accepts in
+ * one request; each window's transcript is shifted back onto the video's own
+ * timeline so citations still point at the right moment.
+ *
+ * @param url - YouTube page URL
+ * @param videoId - Video being imported, for the failure message only
+ * @returns Transcript text, timestamped segments, and recording facts
+ * @throws {SourceExtractionError} When the server cannot transcribe, or the
+ * audio cannot be read
+ */
+async function transcribeYoutubeAudio(
+    url: string,
+    videoId: string,
+): Promise<{
+    text: string;
+    segments: TranscriptSegment[];
+    durationMs: number | null;
+    language: string | null;
+    provider: string;
+}> {
+    const provider = getSpeechToTextProvider();
+
+    // Nothing to fall back to: the video has no captions and this deployment
+    // either cannot transcribe or has been told not to.
+    if (!provider || !isYoutubeAudioFallbackEnabled()) {
+        throw captionsUnavailableFailure(videoId);
+    }
+
+    return withYoutubeAudio(
+        url,
+        { maxWindowBytes: provider.maxInputBytes },
+        async (windows, facts) => {
+            const transcribed: TranscriptWindow[] = [];
+            let language: string | null = null;
+            let transcribedMs = 0;
+
+            for (const window of windows) {
+                const result = await provider.transcribe({
+                    audio: await readWindowBytes(window),
+                    fileName: window.fileName,
+                    mimeType: window.mimeType,
+                    // Pinning later windows to the language detected in the
+                    // first stops a quiet passage mid-video from being detected
+                    // as a different language and transcribed as gibberish.
+                    ...(language ? { language } : {}),
+                });
+
+                language ??= result.language;
+                transcribedMs += result.durationMs ?? 0;
+                transcribed.push({
+                    startSeconds: window.startSeconds,
+                    text: result.text,
+                    segments: result.segments,
+                });
+            }
+
+            const merged = mergeTranscriptWindows(transcribed);
+
+            // Music and ambience come back as pages of `♪♪`, which is not
+            // nothing but is nothing anyone can ask a question about.
+            if (!hasTranscribableSpeech(merged.text)) {
+                throw new SourceExtractionError(
+                    "NO_EXTRACTABLE_CONTENT",
+                    "This video has no captions and no speech in its audio, so there is nothing to import.",
+                );
+            }
+
+            return {
+                text: merged.text,
+                segments: merged.segments,
+                // YouTube's own figure covers the whole video; the sum of what
+                // was transcribed is the fallback when it reported none.
+                durationMs:
+                    facts.durationSeconds === null
+                        ? transcribedMs || null
+                        : Math.round(facts.durationSeconds * 1_000),
+                language,
+                provider: provider.id,
+            };
+        },
+    );
 }
 
 /** Facts learned about a recording while transcribing it. */
@@ -222,14 +321,62 @@ async function extractSourceText(
     }
 
     if (source.type === "YOUTUBE" && source.url) {
-        const transcript = await fetchYoutubeTranscript(source.url);
-        enforceExtractedContentLimits(transcript.content, transcript.segments.length);
+        const metadata = parseMetadata(source.metadata);
+
+        // A previous attempt already paid a provider to transcribe this video's
+        // audio. Re-reading YouTube would only rediscover the missing captions.
+        if (
+            text &&
+            metadata.transcriptProvider &&
+            metadata.transcriptSegments?.length
+        ) {
+            return {
+                text,
+                pageCount: undefined,
+                pages: undefined,
+                transcriptSegments: metadata.transcriptSegments,
+                audio: undefined,
+            };
+        }
+
+        const outcome = await fetchYoutubeTranscript(source.url);
+        if (outcome.kind === "transcript") {
+            enforceExtractedContentLimits(
+                outcome.content,
+                outcome.segments.length,
+            );
+            return {
+                text: outcome.content,
+                pageCount: undefined,
+                pages: undefined,
+                transcriptSegments: outcome.segments,
+                audio: undefined,
+            };
+        }
+
+        // No captions exist, so the spoken audio is the only source of text.
+        logger.info(
+            { sourceId: source.id, videoId: outcome.videoId },
+            "youtube video has no captions, transcribing its audio",
+        );
+        const transcribed = await transcribeYoutubeAudio(
+            source.url,
+            outcome.videoId,
+        );
+        enforceExtractedContentLimits(
+            transcribed.text,
+            transcribed.segments.length,
+        );
         return {
-            text: transcript.content,
+            text: transcribed.text,
             pageCount: undefined,
             pages: undefined,
-            transcriptSegments: transcript.segments,
-            audio: undefined,
+            transcriptSegments: transcribed.segments,
+            audio: {
+                durationMs: transcribed.durationMs,
+                language: transcribed.language,
+                provider: transcribed.provider,
+            },
         };
     }
 
