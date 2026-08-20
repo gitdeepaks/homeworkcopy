@@ -1,0 +1,130 @@
+# A staging-shaped stack you can run on one machine.
+#
+# The point of this file is rehearsal, not production. It stands up the same four
+# pieces a real deployment has — database, migration job, API, client — wired in
+# the same order, so a migration that fails or an environment variable that is
+# missing is found here rather than in a deploy window.
+#
+# What it deliberately does not do is pretend to be production. Postgres runs in
+# a container with a local volume, and the backup and restore procedure in
+# `deploy/RUNBOOK.md` assumes a managed database with point-in-time recovery.
+#
+# Usage:
+#   cp deploy/.env.staging.example .env
+#   docker compose up --build
+
+name: homeworkcopy
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: homeworkcopy
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-homeworkcopy}
+      POSTGRES_DB: homeworkcopy
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5434:5432"
+    healthcheck:
+      # `pg_isready` alone reports a server that is up but still recovering, so
+      # the database name is named explicitly.
+      test: ["CMD-SHELL", "pg_isready -U homeworkcopy -d homeworkcopy"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Runs to completion, then exits. The API waits on it having succeeded, which
+  # is what keeps a new build from starting against an old schema.
+  migrate:
+    build:
+      context: .
+      dockerfile: deploy/migrate.Dockerfile
+    environment:
+      DATABASE_URL: postgresql://homeworkcopy:${POSTGRES_PASSWORD:-homeworkcopy}@postgres:5432/homeworkcopy
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    environment:
+      NODE_ENV: production
+      PORT: 8080
+      DATABASE_URL: postgresql://homeworkcopy:${POSTGRES_PASSWORD:-homeworkcopy}@postgres:5432/homeworkcopy
+      CLIENT_URL: ${CLIENT_URL}
+      # One proxy hop: the client's rewrites sit in front of the API. Set this to
+      # match your real topology — too high lets a caller forge the address their
+      # rate limit is keyed on.
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
+      OPS_TOKEN: ${OPS_TOKEN}
+      CLERK_PUBLISHABLE_KEY: ${CLERK_PUBLISHABLE_KEY}
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY}
+      CLERK_WEBHOOK_SIGNING_SECRET: ${CLERK_WEBHOOK_SIGNING_SECRET}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      PINECONE_API_KEY: ${PINECONE_API_KEY}
+      PINECONE_INDEX: ${PINECONE_INDEX}
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME}
+      CLOUDINARY_UPLOAD_PRESET: ${CLOUDINARY_UPLOAD_PRESET}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET}
+      INNGEST_EVENT_KEY: ${INNGEST_EVENT_KEY}
+      INNGEST_SIGNING_KEY: ${INNGEST_SIGNING_KEY}
+      FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY}
+      TAVILY_API_KEY: ${TAVILY_API_KEY}
+      MEM0_API_KEY: ${MEM0_API_KEY}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  client:
+    build:
+      context: .
+      dockerfile: client/Dockerfile
+      args:
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+        API_URL: http://api:8080
+    environment:
+      NODE_ENV: production
+      API_URL: http://api:8080
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  # Inngest in production is a hosted service that calls the API's
+  # `/api/inngest` endpoint over the internet — there is nothing to deploy, only
+  # `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY` to set. This container is the
+  # local stand-in so jobs actually run when rehearsing the stack offline.
+  #
+  #   docker compose --profile local-jobs up
+  #
+  # Never enable this profile against a production database: the dev server
+  # accepts unsigned requests, which is exactly what `INNGEST_DEV` is refused for
+  # in production.
+  inngest:
+    image: inngest/inngest:v1.41.1
+    profiles: ["local-jobs"]
+    command: inngest dev -u http://api:8080/api/inngest --no-discovery
+    ports:
+      - "8288:8288"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  postgres-data:

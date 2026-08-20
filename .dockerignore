@@ -1,0 +1,14 @@
+**/node_modules
+**/.next
+**/dist
+**/.git
+**/.env
+**/.env.*
+!**/.env.example
+**/.turbo
+**/coverage
+**/*.log
+**/.DS_Store
+**/tsconfig.tsbuildinfo
+server/src/generated
+deploy/backups
