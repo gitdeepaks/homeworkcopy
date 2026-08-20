@@ -10,6 +10,7 @@ import {
     LaptopIcon,
     LogOutIcon,
     MoonIcon,
+    ShieldIcon,
     SunIcon,
     UserRoundIcon,
 } from "lucide-react";
@@ -26,6 +27,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Spinner } from "@/components/ui/spinner";
 import { memoryRoutes } from "@/features/memory";
+import { privacyRoutes } from "@/features/privacy";
 import { useNotebookUiStore } from "@/features/workspaces/stores/notebook-ui-store";
 import { authRoutes } from "../lib/auth-routes";
 
@@ -102,6 +104,12 @@ export function AccountMenu() {
                     >
                         <BrainIcon />
                         Memory
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                        onClick={() => router.push(privacyRoutes.settings)}
+                    >
+                        <ShieldIcon />
+                        Privacy and data
                     </DropdownMenuItem>
                 </DropdownMenuGroup>
                 <DropdownMenuSeparator />
