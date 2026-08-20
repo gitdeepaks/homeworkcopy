@@ -38,9 +38,10 @@ describe("role matrix", () => {
         }
     });
 
-    test("a viewer can only read", () => {
+    test("a viewer can only read, and take away a copy of what they read", () => {
         expect(permissionsForRole("VIEWER")).toEqual([
             "member:read",
+            "notebook:export",
             "notebook:read",
         ]);
     });

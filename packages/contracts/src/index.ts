@@ -1753,6 +1753,7 @@ export const notebookPermissionSchema = z.enum([
     "member:manage",
     "share:manage",
     "audit:read",
+    "notebook:export",
 ]);
 
 export type NotebookPermission = z.infer<typeof notebookPermissionSchema>;
@@ -1766,6 +1767,10 @@ export type NotebookPermission = z.infer<typeof notebookPermissionSchema>;
 const VIEWER_PERMISSIONS = [
     "notebook:read",
     "member:read",
+    // A reader may take away a copy of what they can already read. Withholding
+    // it would not protect the data — it is on their screen — it would only
+    // make leaving harder, which is not a security property.
+    "notebook:export",
 ] as const satisfies readonly NotebookPermission[];
 
 /**
@@ -2213,3 +2218,738 @@ export const SHARE_REJECTION_MESSAGES: Readonly<
     NOTEBOOK_FULL:
         "This notebook has reached its member limit. Ask the owner to remove someone first.",
 };
+
+/* -------------------------------------------------------------------------- */
+/*                     Privacy, retention, and operations                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Every external service that can receive Homeworkcopy data.
+ *
+ * This enum is the reason the disclosure page can be trusted: a processor that
+ * is not listed here cannot be described, and adding a provider to the product
+ * without adding it here fails {@link DATA_PROCESSORS}' exhaustiveness at
+ * compile time. "We forgot to document that one" stops being possible.
+ */
+export const dataProcessorIdSchema = z.enum([
+    "clerk",
+    "openai",
+    "pinecone",
+    "cloudinary",
+    "firecrawl",
+    "tavily",
+    "mem0",
+    "inngest",
+    "neon",
+]);
+
+export type DataProcessorId = z.infer<typeof dataProcessorIdSchema>;
+
+/**
+ * Kinds of data, named from the reader's point of view rather than the
+ * schema's. Someone deciding whether to turn a feature off cares that "what I
+ * type into chat" leaves the product, not that `message.content` does.
+ */
+export const dataCategorySchema = z.enum([
+    "identity",
+    "sourceContent",
+    "chatContent",
+    "generatedContent",
+    "storedFiles",
+    "usageMetadata",
+]);
+
+export type DataCategory = z.infer<typeof dataCategorySchema>;
+
+export const DATA_CATEGORY_LABELS: Readonly<Record<DataCategory, string>> = {
+    identity: "Your name, email address, and profile picture",
+    sourceContent: "The text of sources you add to a notebook",
+    chatContent: "What you ask and what the assistant answers",
+    generatedContent: "Summaries, study guides, audio, and other outputs",
+    storedFiles: "Files you upload and media the product generates",
+    usageMetadata: "Request timing, job outcomes, and error codes",
+};
+
+/**
+ * Whether a reader can decline a processor.
+ *
+ * `required` processors are the product: declining them means not having an
+ * account. `optional` ones back a feature that can be switched off and is
+ * useful without, which is what makes the consent controls honest.
+ */
+export const processorNecessitySchema = z.enum(["required", "optional"]);
+
+export type ProcessorNecessity = z.infer<typeof processorNecessitySchema>;
+
+export const dataProcessorSchema = z.object({
+    id: dataProcessorIdSchema,
+    name: z.string().min(1),
+    /** What the product uses it for, in the reader's words. */
+    purpose: z.string().min(1),
+    categories: z.array(dataCategorySchema).min(1),
+    necessity: processorNecessitySchema,
+    /**
+     * Whether the provider retains the content it receives, as opposed to
+     * processing it and discarding it. Drives the strongest sentence on the
+     * disclosure page, so it is stated per provider rather than in general.
+     */
+    retainsContent: z.boolean(),
+    policyUrl: z.url(),
+    /**
+     * The preference that turns this processor off, when one exists. `null`
+     * marks a processor whose only off switch is deleting the account.
+     */
+    controlledBy: z.enum(["learnedMemory", "webSearch"]).nullable(),
+});
+
+export type DataProcessor = z.infer<typeof dataProcessorSchema>;
+
+/**
+ * The published disclosure.
+ *
+ * `Record<DataProcessorId, ...>` rather than an array, so the compiler — not a
+ * reviewer — is what notices a missing entry.
+ */
+export const DATA_PROCESSORS: Readonly<Record<DataProcessorId, DataProcessor>> =
+    {
+        clerk: {
+            id: "clerk",
+            name: "Clerk",
+            purpose: "Signs you in and holds your account identity.",
+            categories: ["identity"],
+            necessity: "required",
+            retainsContent: true,
+            policyUrl: "https://clerk.com/legal/privacy",
+            controlledBy: null,
+        },
+        neon: {
+            id: "neon",
+            name: "Managed PostgreSQL",
+            purpose:
+                "Stores your notebooks, sources, conversations, outputs, and notes.",
+            categories: [
+                "identity",
+                "sourceContent",
+                "chatContent",
+                "generatedContent",
+                "usageMetadata",
+            ],
+            necessity: "required",
+            retainsContent: true,
+            policyUrl: "https://neon.tech/privacy-policy",
+            controlledBy: null,
+        },
+        openai: {
+            id: "openai",
+            name: "OpenAI",
+            purpose:
+                "Answers your questions, writes Studio outputs, embeds sources for search, and narrates audio.",
+            categories: ["sourceContent", "chatContent", "generatedContent"],
+            necessity: "required",
+            retainsContent: false,
+            policyUrl: "https://openai.com/policies/privacy-policy",
+            controlledBy: null,
+        },
+        pinecone: {
+            id: "pinecone",
+            name: "Pinecone",
+            purpose:
+                "Stores the searchable index of your sources so answers can cite them.",
+            categories: ["sourceContent"],
+            necessity: "required",
+            retainsContent: true,
+            policyUrl: "https://www.pinecone.io/privacy/",
+            controlledBy: null,
+        },
+        cloudinary: {
+            id: "cloudinary",
+            name: "Cloudinary",
+            purpose: "Stores uploaded files and generated audio and video.",
+            categories: ["storedFiles", "generatedContent"],
+            necessity: "required",
+            retainsContent: true,
+            policyUrl: "https://cloudinary.com/privacy",
+            controlledBy: null,
+        },
+        inngest: {
+            id: "inngest",
+            name: "Inngest",
+            purpose:
+                "Runs source processing and output generation in the background.",
+            categories: ["usageMetadata"],
+            necessity: "required",
+            retainsContent: false,
+            policyUrl: "https://www.inngest.com/privacy",
+            controlledBy: null,
+        },
+        firecrawl: {
+            id: "firecrawl",
+            name: "Firecrawl",
+            purpose: "Fetches a web page you import as a source.",
+            categories: ["sourceContent"],
+            necessity: "optional",
+            retainsContent: false,
+            policyUrl: "https://www.firecrawl.dev/privacy-policy",
+            controlledBy: null,
+        },
+        tavily: {
+            id: "tavily",
+            name: "Tavily",
+            purpose:
+                "Searches the web when you ask a question in web-grounded mode.",
+            categories: ["chatContent"],
+            necessity: "optional",
+            retainsContent: false,
+            policyUrl: "https://tavily.com/privacy",
+            controlledBy: "webSearch",
+        },
+        mem0: {
+            id: "mem0",
+            name: "Mem0",
+            purpose:
+                "Remembers preferences you state in chat so later answers can use them.",
+            categories: ["chatContent"],
+            necessity: "optional",
+            retainsContent: true,
+            policyUrl: "https://mem0.ai/privacy",
+            controlledBy: "learnedMemory",
+        },
+    };
+
+export const DATA_PROCESSOR_IDS: readonly DataProcessorId[] =
+    dataProcessorIdSchema.options;
+
+/**
+ * The processors a given set of preferences currently allows.
+ *
+ * @param preferences - The reader's consent choices
+ * @returns Every processor that can receive data under those choices
+ */
+export function activeDataProcessors(
+    preferences: PrivacyPreferences,
+): readonly DataProcessor[] {
+    return DATA_PROCESSOR_IDS.map((id) => DATA_PROCESSORS[id]).filter(
+        (processor) => {
+            if (processor.controlledBy === null) return true;
+            return preferences[processor.controlledBy];
+        },
+    );
+}
+
+/* ----------------------------- Consent controls ---------------------------- */
+
+/**
+ * The choices a reader can make about optional processing.
+ *
+ * Both default to off. A provider that stores what a reader typed should start
+ * disabled and be switched on deliberately, not discovered later in a
+ * disclosure page.
+ */
+export const privacyPreferencesSchema = z.object({
+    /**
+     * Whether the memory provider may hold anything at all for this account:
+     * chat turns it learns from, memories it recalls into later answers, and
+     * memories the reader writes by hand.
+     *
+     * Deliberately one switch rather than three. The disclosure says that with
+     * this off nothing reaches the provider, and a hand-written memory still
+     * being stored there would make that sentence false — which is worse than a
+     * coarser control.
+     */
+    learnedMemory: z.boolean(),
+    /** Whether a question may be sent to a web search provider. */
+    webSearch: z.boolean(),
+});
+
+export type PrivacyPreferences = z.infer<typeof privacyPreferencesSchema>;
+
+/** Applied to an account that has never opened the privacy settings. */
+export const DEFAULT_PRIVACY_PREFERENCES: PrivacyPreferences = {
+    learnedMemory: false,
+    webSearch: false,
+};
+
+/** A preference change; omitted keys keep their stored value. */
+export const updatePrivacyPreferencesSchema = privacyPreferencesSchema
+    .partial()
+    .refine(
+        (value) => Object.keys(value).length > 0,
+        "Provide at least one preference to change",
+    );
+
+export type UpdatePrivacyPreferences = z.infer<
+    typeof updatePrivacyPreferencesSchema
+>;
+
+/** Preferences plus when they were last changed, as the settings page reads them. */
+export const privacySettingsSchema = z.object({
+    preferences: privacyPreferencesSchema,
+    /** `null` until the reader first changes something. */
+    updatedAt: z.iso.datetime().nullable(),
+});
+
+export type PrivacySettings = z.infer<typeof privacySettingsSchema>;
+
+/** The disclosure as served, so the client renders it rather than repeating it. */
+export const privacyDisclosureSchema = z.object({
+    version: z.literal(1),
+    processors: z.array(dataProcessorSchema),
+    preferences: privacyPreferencesSchema,
+    retention: z.array(
+        z.object({
+            resource: z.string().min(1),
+            summary: z.string().min(1),
+            retainedDays: z.number().int().positive().nullable(),
+        }),
+    ),
+});
+
+export type PrivacyDisclosure = z.infer<typeof privacyDisclosureSchema>;
+
+/* -------------------------------- Retention -------------------------------- */
+
+/**
+ * Data whose lifetime is bounded by policy rather than by a reader's action.
+ *
+ * Anything a reader deletes goes immediately. This list is the other half: rows
+ * nobody will ever think to clean up, which is exactly why an unattended job
+ * has to.
+ */
+export const retainedResourceSchema = z.enum([
+    "auditEvent",
+    "chatUsage",
+    "clerkWebhookEvent",
+    "failedOutput",
+    "resolvedInvitation",
+    "expiredShareLink",
+    "dataExport",
+    "deletionReceipt",
+]);
+
+export type RetainedResource = z.infer<typeof retainedResourceSchema>;
+
+export const retentionRuleSchema = z.object({
+    resource: retainedResourceSchema,
+    /** What a reader is told about this class of data. */
+    summary: z.string().min(1),
+    /** Days after which a row is purged. `null` means retained indefinitely. */
+    retainedDays: z.number().int().positive().nullable(),
+});
+
+export type RetentionRule = z.infer<typeof retentionRuleSchema>;
+
+/**
+ * The retention policy, in one table.
+ *
+ * The published disclosure and the purge job read the same values, so the page
+ * cannot drift from what the job actually does.
+ */
+export const RETENTION_POLICY: Readonly<
+    Record<RetainedResource, RetentionRule>
+> = {
+    auditEvent: {
+        resource: "auditEvent",
+        summary:
+            "Notebook activity — who was invited, whose role changed, what was deleted.",
+        retainedDays: 365,
+    },
+    chatUsage: {
+        resource: "chatUsage",
+        summary: "Daily request and token counts used to enforce your allowance.",
+        retainedDays: 90,
+    },
+    clerkWebhookEvent: {
+        resource: "clerkWebhookEvent",
+        summary:
+            "Records of account updates received from the sign-in provider, kept to avoid processing one twice.",
+        retainedDays: 30,
+    },
+    failedOutput: {
+        resource: "failedOutput",
+        summary:
+            "Studio outputs that failed to generate, kept so you can see why before they are cleared.",
+        retainedDays: 30,
+    },
+    resolvedInvitation: {
+        resource: "resolvedInvitation",
+        summary: "Invitations that were accepted or revoked.",
+        retainedDays: 90,
+    },
+    expiredShareLink: {
+        resource: "expiredShareLink",
+        summary: "Share links that have expired or been revoked.",
+        retainedDays: 30,
+    },
+    dataExport: {
+        resource: "dataExport",
+        summary:
+            "Export archives you requested, and the download link that reaches them.",
+        retainedDays: 7,
+    },
+    deletionReceipt: {
+        resource: "deletionReceipt",
+        summary:
+            "A record that an account was deleted, holding no personal data, kept to prove the deletion ran.",
+        retainedDays: null,
+    },
+};
+
+export const RETAINED_RESOURCES: readonly RetainedResource[] =
+    retainedResourceSchema.options;
+
+/**
+ * The cutoff before which rows of a given class should be purged.
+ *
+ * @param resource - Class of data being purged
+ * @param now - Current time
+ * @returns The cutoff timestamp, or `null` when the class is retained forever
+ */
+export function retentionCutoff(
+    resource: RetainedResource,
+    now: Date,
+): Date | null {
+    const { retainedDays } = RETENTION_POLICY[resource];
+    if (retainedDays === null) return null;
+    return new Date(now.getTime() - retainedDays * 24 * 60 * 60 * 1000);
+}
+
+/* ------------------------------- Data export ------------------------------- */
+
+export const EXPORT_TTL_DAYS = RETENTION_POLICY.dataExport.retainedDays ?? 7;
+
+/** What an export request covers. */
+export const exportScopeSchema = z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("account") }),
+    z.object({ kind: z.literal("notebook"), workspaceId: z.string().min(1) }),
+]);
+
+export type ExportScope = z.infer<typeof exportScopeSchema>;
+
+/**
+ * Lifecycle of an export.
+ *
+ * `EXPIRED` is distinct from `FAILED` on purpose: a reader whose archive aged
+ * out should be told to request another one, not that something went wrong.
+ */
+export const exportStatusSchema = z.enum([
+    "PENDING",
+    "PROCESSING",
+    "READY",
+    "FAILED",
+    "EXPIRED",
+]);
+
+export type ExportStatus = z.infer<typeof exportStatusSchema>;
+
+export const exportFailureCodeSchema = z.enum([
+    "EXPORT_TOO_LARGE",
+    "STORAGE_UNAVAILABLE",
+    "EXPORT_FAILED",
+]);
+
+export type ExportFailureCode = z.infer<typeof exportFailureCodeSchema>;
+
+export const EXPORT_FAILURE_MESSAGES: Readonly<
+    Record<ExportFailureCode, string>
+> = {
+    EXPORT_TOO_LARGE:
+        "This export is larger than we can package in one archive. Export individual notebooks instead.",
+    STORAGE_UNAVAILABLE:
+        "Export storage is unavailable right now. Try again in a few minutes.",
+    EXPORT_FAILED:
+        "The export could not be completed. Try again, and contact support if it keeps failing.",
+};
+
+/** Ceiling on a single archive, matched by the job that builds one. */
+export const EXPORT_MAX_BYTES = 200 * 1024 * 1024;
+
+/** How long a minted export download URL stays usable. */
+export const EXPORT_URL_TTL_SECONDS = 15 * 60;
+
+/**
+ * The export archive's own schema version.
+ *
+ * An archive outlives the build that wrote it, so it carries a version a future
+ * importer can branch on.
+ */
+export const EXPORT_FORMAT_VERSION = 1;
+
+/** Counts of what an archive contains, shown before the reader downloads it. */
+export const exportManifestSchema = z.object({
+    formatVersion: z.literal(EXPORT_FORMAT_VERSION),
+    generatedAt: z.iso.datetime(),
+    scope: exportScopeSchema,
+    counts: z.object({
+        notebooks: z.number().int().nonnegative(),
+        sources: z.number().int().nonnegative(),
+        conversations: z.number().int().nonnegative(),
+        messages: z.number().int().nonnegative(),
+        outputs: z.number().int().nonnegative(),
+        notes: z.number().int().nonnegative(),
+    }),
+    /**
+     * Data the archive deliberately leaves out, so a reader can tell the
+     * difference between "not exported" and "not held".
+     */
+    excluded: z.array(z.string().min(1)),
+    bytes: z.number().int().nonnegative(),
+});
+
+export type ExportManifest = z.infer<typeof exportManifestSchema>;
+
+/** An export request as the settings page reads it. */
+export const dataExportSchema = z.object({
+    id: z.string().min(1),
+    scope: exportScopeSchema,
+    status: exportStatusSchema,
+    failureCode: exportFailureCodeSchema.nullable(),
+    manifest: exportManifestSchema.nullable(),
+    /** Minted only while the export is `READY`, and short-lived. */
+    downloadUrl: z.url().nullable(),
+    expiresAt: z.iso.datetime().nullable(),
+    requestedAt: z.iso.datetime(),
+    completedAt: z.iso.datetime().nullable(),
+});
+
+export type DataExport = z.infer<typeof dataExportSchema>;
+
+export const createExportRequestSchema = z.object({
+    scope: exportScopeSchema,
+});
+
+export type CreateExportRequest = z.infer<typeof createExportRequestSchema>;
+
+/**
+ * What an account export never contains.
+ *
+ * Learned memories live with the memory provider under its own controls and are
+ * exported and deleted there; copying them into an archive would create a second
+ * place a deletion request has to chase. The rest is other people's data.
+ */
+export const EXPORT_EXCLUSIONS: readonly string[] = [
+    "Learned memories, which you manage and delete in privacy settings",
+    "Notebooks owned by other people, including ones shared with you",
+    "Other members' names and email addresses",
+    "Search index vectors, which are rebuilt from your sources",
+];
+
+/* ----------------------------- Account deletion ---------------------------- */
+
+/**
+ * The typed phrase that arms account deletion.
+ *
+ * A checkbox is too easy to hit by accident for something with no undo, and the
+ * phrase is checked on the server so a client cannot skip it.
+ */
+export const DELETE_ACCOUNT_CONFIRMATION = "DELETE MY ACCOUNT";
+
+export const deleteAccountRequestSchema = z.object({
+    confirmation: z.literal(DELETE_ACCOUNT_CONFIRMATION),
+});
+
+export type DeleteAccountRequest = z.infer<typeof deleteAccountRequestSchema>;
+
+/**
+ * Every store an account's data can be sitting in.
+ *
+ * Deletion walks this list rather than a hand-written sequence, so a new store
+ * cannot be added to the product and forgotten by the deletion path.
+ */
+export const deletionTargetSchema = z.enum([
+    "database",
+    "vectorIndex",
+    "objectStorage",
+    "learnedMemory",
+    "identityProvider",
+]);
+
+export type DeletionTarget = z.infer<typeof deletionTargetSchema>;
+
+export const DELETION_TARGETS: readonly DeletionTarget[] =
+    deletionTargetSchema.options;
+
+export const DELETION_TARGET_LABELS: Readonly<Record<DeletionTarget, string>> = {
+    database: "Notebooks, sources, conversations, outputs, and notes",
+    vectorIndex: "The search index built from your sources",
+    objectStorage: "Uploaded files and generated audio and video",
+    learnedMemory: "Memories learned from your chats",
+    identityProvider: "Your sign-in identity",
+};
+
+/**
+ * What happened to one store.
+ *
+ * `SKIPPED` records a store this deployment never wrote to — an optional
+ * provider that was never configured — which is different from having tried and
+ * failed, and a reader asking "is my data gone?" deserves to see which.
+ */
+export const deletionOutcomeStatusSchema = z.enum([
+    "DELETED",
+    "SKIPPED",
+    "FAILED",
+]);
+
+export type DeletionOutcomeStatus = z.infer<typeof deletionOutcomeStatusSchema>;
+
+export const deletionOutcomeSchema = z.object({
+    target: deletionTargetSchema,
+    status: deletionOutcomeStatusSchema,
+    /** Counts only — never an identifier, and never provider error text. */
+    removedCount: z.number().int().nonnegative().nullable(),
+});
+
+export type DeletionOutcome = z.infer<typeof deletionOutcomeSchema>;
+
+export const deletionStatusSchema = z.enum([
+    "PENDING",
+    "PROCESSING",
+    "COMPLETED",
+    /** Some store refused. The account row stays until every store is clear. */
+    "INCOMPLETE",
+]);
+
+export type DeletionStatus = z.infer<typeof deletionStatusSchema>;
+
+/**
+ * The receipt for a deletion.
+ *
+ * It holds no personal data — not the email, not the name — because it has to
+ * outlive the account it describes. What it proves is that the deletion ran and
+ * which stores confirmed, which is the question an auditor and a former user
+ * both ask.
+ */
+export const deletionReceiptSchema = z.object({
+    id: z.string().min(1),
+    status: deletionStatusSchema,
+    outcomes: z.array(deletionOutcomeSchema),
+    requestedAt: z.iso.datetime(),
+    completedAt: z.iso.datetime().nullable(),
+});
+
+export type DeletionReceipt = z.infer<typeof deletionReceiptSchema>;
+
+/**
+ * Whether every store an account touched has confirmed removal.
+ *
+ * @param outcomes - Result of walking every deletion target
+ * @returns `COMPLETED` only when nothing failed
+ */
+export function deletionStatusFromOutcomes(
+    outcomes: readonly DeletionOutcome[],
+): Extract<DeletionStatus, "COMPLETED" | "INCOMPLETE"> {
+    const covered = new Set(outcomes.map((outcome) => outcome.target));
+    const everyTargetReported = DELETION_TARGETS.every((target) =>
+        covered.has(target),
+    );
+    const anyFailed = outcomes.some((outcome) => outcome.status === "FAILED");
+    return everyTargetReported && !anyFailed ? "COMPLETED" : "INCOMPLETE";
+}
+
+/* -------------------------------- Operations ------------------------------- */
+
+/**
+ * A dependency the API can report on.
+ *
+ * `required` components decide readiness; optional ones never do. An outage at
+ * a web-search provider must not take a healthy API out of the load balancer,
+ * and conflating the two is how a partial outage becomes a total one.
+ */
+export const healthComponentSchema = z.enum([
+    "database",
+    "vectorIndex",
+    "objectStorage",
+    "modelProvider",
+    "jobQueue",
+    "webSearch",
+    "learnedMemory",
+    "webScraper",
+    "speech",
+]);
+
+export type HealthComponent = z.infer<typeof healthComponentSchema>;
+
+/**
+ * `NOT_CONFIGURED` is a healthy answer for an optional component: a deployment
+ * that never set a web-search key is correctly configured, not degraded.
+ */
+export const healthCheckStatusSchema = z.enum([
+    "OK",
+    "DEGRADED",
+    "DOWN",
+    "NOT_CONFIGURED",
+]);
+
+export type HealthCheckStatus = z.infer<typeof healthCheckStatusSchema>;
+
+export const healthStatusSchema = z.enum(["OK", "DEGRADED", "DOWN"]);
+
+export type HealthStatus = z.infer<typeof healthStatusSchema>;
+
+export const healthCheckSchema = z.object({
+    component: healthComponentSchema,
+    required: z.boolean(),
+    status: healthCheckStatusSchema,
+    /** `null` when the check did not run, e.g. an unconfigured component. */
+    latencyMs: z.number().int().nonnegative().nullable(),
+    /**
+     * A short, authored explanation. Never a provider message: a health page is
+     * frequently the least authenticated surface a deployment has.
+     */
+    detail: z.string().max(200).nullable(),
+});
+
+export type HealthCheck = z.infer<typeof healthCheckSchema>;
+
+export const healthReportSchema = z.object({
+    status: healthStatusSchema,
+    uptimeSeconds: z.number().int().nonnegative(),
+    checks: z.array(healthCheckSchema),
+});
+
+export type HealthReport = z.infer<typeof healthReportSchema>;
+
+/** Which components must be healthy for the API to serve traffic at all. */
+export const REQUIRED_HEALTH_COMPONENTS: readonly HealthComponent[] = [
+    "database",
+];
+
+/**
+ * Whether a component's failure should take the instance out of rotation.
+ *
+ * @param component - Component being checked
+ * @returns `true` when readiness depends on it
+ */
+export function isRequiredHealthComponent(component: HealthComponent): boolean {
+    return REQUIRED_HEALTH_COMPONENTS.includes(component);
+}
+
+/**
+ * Rolls individual checks into one answer.
+ *
+ * A required component that is down makes the whole API down. Everything else —
+ * a required component that is slow, an optional one that is unreachable —
+ * degrades it, because the product still answers questions from notebook
+ * sources when web search is unavailable.
+ *
+ * @param checks - Results of the individual component checks
+ * @returns The aggregate status
+ */
+export function aggregateHealthStatus(
+    checks: readonly HealthCheck[],
+): HealthStatus {
+    if (
+        checks.some((check) => check.required && check.status === "DOWN")
+    ) {
+        return "DOWN";
+    }
+    if (
+        checks.some(
+            (check) =>
+                check.status === "DOWN" ||
+                check.status === "DEGRADED",
+        )
+    ) {
+        return "DEGRADED";
+    }
+    return "OK";
+}

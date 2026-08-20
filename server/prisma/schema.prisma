@@ -24,6 +24,8 @@ model User {
   invitesSent   NotebookInvitation[] @relation("NotebookInvitationInviter")
   shareLinks    NotebookShareLink[]  @relation("NotebookShareLinkCreator")
   auditEvents   AuditEvent[]         @relation("AuditEventActor")
+  privacy       UserPrivacySetting?
+  dataExports   DataExport[]
 
   @@unique([email])
   @@map("user")
@@ -44,6 +46,8 @@ model ClerkWebhookEvent {
   processedAt DateTime?
 
   @@index([status, receivedAt])
+  // Retention purges by age alone, which the composite index above cannot serve.
+  @@index([receivedAt])
   @@map("clerk_webhook_event")
 }
 
@@ -413,6 +417,8 @@ model NotebookInvitation {
 
   @@index([workspaceId, status])
   @@index([email, status])
+  // Retention purges resolved invitations by when they were resolved.
+  @@index([status, updatedAt])
   @@map("notebook_invitation")
 }
 
@@ -480,4 +486,95 @@ model AuditEvent {
   @@index([workspaceId, createdAt])
   @@index([actorUserId])
   @@map("audit_event")
+}
+
+/// A reader's choices about optional processing.
+///
+/// Absent until the reader changes something, and read through
+/// `DEFAULT_PRIVACY_PREFERENCES` when absent, so "never opened the settings"
+/// and "turned both off" behave identically rather than differing by accident.
+model UserPrivacySetting {
+  userId               String   @id
+  /// Whether chat turns may be sent to the memory provider, and whether learned
+  /// memories may be recalled into later answers.
+  learnedMemoryEnabled Boolean  @default(false)
+  /// Whether a question may be sent to a web search provider.
+  webSearchEnabled     Boolean  @default(false)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_privacy_setting")
+}
+
+enum DataExportScope {
+  ACCOUNT
+  NOTEBOOK
+}
+
+enum DataExportStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+  EXPIRED
+}
+
+/// An archive a reader asked for.
+///
+/// `workspaceId` is an identifier, not a foreign key. An export is a snapshot
+/// taken at a moment in time; deleting the notebook afterwards should not make
+/// the archive you already asked for disappear, and the retention job is what
+/// eventually clears both the row and the stored object.
+model DataExport {
+  id              String           @id @default(cuid())
+  userId          String
+  scope           DataExportScope
+  workspaceId     String?
+  status          DataExportStatus @default(PENDING)
+  /// One of `exportFailureCodeSchema`. Never a provider message.
+  failureCode     String?
+  /// Versioned `exportManifestSchema` payload: counts and exclusions only.
+  manifest        Json?
+  /// Object storage id for the archive, so retention can delete the bytes and
+  /// not merely the row that pointed at them.
+  storagePublicId String?
+  bytes           Int?
+  expiresAt       DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([status, expiresAt])
+  @@map("data_export")
+}
+
+enum DeletionStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  INCOMPLETE
+}
+
+/// Proof that an account deletion ran.
+///
+/// Deliberately holds no personal data and no foreign key: it has to outlive the
+/// row it describes, and a receipt carrying the email of someone who asked to be
+/// forgotten would defeat its own purpose. `subjectHash` is a SHA-256 of the
+/// deleted user id — enough to match a support request against a receipt, and
+/// not enough to identify anyone from the table alone.
+model DeletionReceipt {
+  id          String         @id @default(cuid())
+  subjectHash String         @unique
+  status      DeletionStatus @default(PENDING)
+  /// Versioned array of `deletionOutcomeSchema`: one entry per store, counts only.
+  outcomes    Json?
+  requestedAt DateTime       @default(now())
+  completedAt DateTime?
+  updatedAt   DateTime       @updatedAt
+
+  @@index([status, requestedAt])
+  @@map("deletion_receipt")
 }
