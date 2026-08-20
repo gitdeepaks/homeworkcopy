@@ -10,6 +10,7 @@ import { parseYoutubeVideoId } from "../lib/youtube.js";
 import { deleteCloudinaryObject, uploadPdfToCloudinary } from "../lib/cloudinary.js";
 import { enqueueSourceDeletion, enqueueSourceProcessing } from "../lib/source-events.js";
 import { logger } from "../lib/logger.js";
+import { assertPublicUrl } from "../lib/url-guard.js";
 import {
     createSourceRecord,
     beginSourceReprocessing,
@@ -424,6 +425,12 @@ export async function importWebsiteSource(
 ) {
     await authorizeNotebook(workspaceId, userId, "source:create");
     const url = canonicalizeSourceUrl(input.url);
+
+    // Checked at import rather than at scrape time, so a reader who pastes an
+    // internal address is told immediately instead of watching a source sit in
+    // PENDING and then fail with a provider error. The address is re-checked
+    // before anything is actually fetched.
+    await assertPublicUrl(url);
 
     return createAndProcessSource({
         workspaceId,

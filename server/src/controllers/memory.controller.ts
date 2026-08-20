@@ -2,9 +2,9 @@ import type { Request, Response } from "express";
 import {
     createMemoryForUser,
     deleteMemoryForUser,
+    listMemoriesForUser,
     updateMemoryForUser,
 } from "../services/memory.service.js";
-import { listUserMemories } from "../lib/mem0.js";
 import {
     createMemorySchema,
     memoryIdParamSchema,
@@ -12,7 +12,7 @@ import {
 } from "../validators/memory.validator.js";
 
 export async function listMemories(req: Request, res: Response) {
-    const memories = await listUserMemories(req.session.user.id);
+    const memories = await listMemoriesForUser(req.session.user.id);
     res.json(memories);
 }
 

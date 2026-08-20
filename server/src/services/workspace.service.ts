@@ -13,6 +13,10 @@ import {
     resolveNotebookAccess,
     type Actor,
 } from "./notebook-access.service.js";
+import {
+    collectWorkspaceStoredObjects,
+    destroyStoredObjects,
+} from "./stored-object.service.js";
 
 /**
  * Loads a notebook for anyone allowed to read it.
@@ -92,12 +96,20 @@ export async function updateWorkspaceForUser(
 }
 
 /**
- * Deletes a notebook and its Pinecone vector namespace.
+ * Deletes a notebook, its vector namespace, and its stored files and media.
  *
  * Every membership, invitation, share link, and audit row cascades with the
- * notebook row, so deletion also ends every collaborator's access. Pinecone
- * cleanup is best-effort: deletion continues even if vector removal fails, and
- * the failure is logged rather than swallowed.
+ * notebook row, so deletion also ends every collaborator's access. The two
+ * external stores do not cascade, and both are cleared *before* the row is
+ * deleted: their identifiers live on the rows, so afterwards there would be
+ * nothing left to find them by, and the objects would stay — unreachable,
+ * undeletable, and still billed.
+ *
+ * External cleanup is best-effort by design. A notebook the reader asked to
+ * delete must disappear even if a storage provider is having an outage, so a
+ * failure is counted and logged rather than blocking the deletion. That is a
+ * deliberate trade: an orphaned object is a cost and a retention problem, and a
+ * notebook that will not delete is a broken product.
  *
  * @param workspaceId - Notebook to delete
  * @param actor - The owner performing the deletion
@@ -128,6 +140,19 @@ export async function deleteWorkspaceForUser(
         await deleteWorkspaceVectors(workspaceId);
     } catch (error) {
         logger.error({ error, workspaceId }, "pinecone namespace delete failed");
+    }
+
+    try {
+        const objects = await collectWorkspaceStoredObjects(workspaceId);
+        const destruction = await destroyStoredObjects(objects);
+        if (destruction.failed > 0) {
+            logger.error(
+                { workspaceId, ...destruction },
+                "notebook stored objects partially deleted",
+            );
+        }
+    } catch (error) {
+        logger.error({ error, workspaceId }, "notebook object cleanup failed");
     }
 
     await deleteWorkspaceRecord(workspaceId);

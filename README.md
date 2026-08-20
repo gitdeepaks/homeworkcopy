@@ -36,6 +36,42 @@ Run `bun run --cwd server auth:reconcile` before cutover and after first-login m
 
 Production policy defaults: one active Clerk session per browser profile, Google OAuth only, Clerk bot protection enabled, and no automatic domain-data cascade on Clerk account deletion. MFA/passkeys require a separate reviewed rollout.
 
+## Production Operations
+
+Deployment manifests live at `server/Dockerfile`, `client/Dockerfile`,
+`deploy/migrate.Dockerfile`, and `docker-compose.yml`. Migrations run as their own
+job before the API rolls, because an API that migrates on boot races itself once
+it has two replicas.
+
+Rehearse the stack locally with `cp deploy/.env.staging.example .env && docker
+compose up --build` (add `--profile local-jobs` to run background jobs too).
+
+Probes answer three different questions and must be wired to three different
+things: `/health/live` for restarts, `/health/ready` for load-balancer rotation,
+and `/health/detail` for dashboards. Pointing liveness at readiness turns a
+database blip into a full restart of every instance. `/health/detail` and
+`/metrics` require `X-Ops-Token` and do not exist without `OPS_TOKEN` set.
+
+`deploy/RUNBOOK.md` carries deploy order, rollback, backup and restore, the alert
+table, the SLOs, and the drills to rehearse before launch.
+
+## Privacy and Data
+
+Learned memory and web search are optional processors, both **default off** per
+account, enforced at the provider boundary and read on every request. Settings
+live at `/settings/privacy`, which also publishes who receives data under the
+reader's current choices, the retention policy, account export, and account
+deletion.
+
+Account deletion walks the vector index, object storage, learned memory, the
+identity provider, and finally PostgreSQL — in that order, because everything else
+is addressed by an identifier only the database holds. It leaves a
+`deletion_receipt` that carries no personal data and outlives the account, which
+is also what a database restore needs in order to avoid resurrecting deleted
+accounts.
+
+See `server/docs/phase11_production_hardening.md`.
+
 ## Environment
 
 - Client: `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, `API_URL`, `NEXT_PUBLIC_APP_URL`.

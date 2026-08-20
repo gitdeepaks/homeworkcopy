@@ -7,6 +7,7 @@
 
 import { extractText, getDocumentProxy } from "unpdf";
 import { getSignedCloudinaryDownloadUrl } from "./cloudinary.js";
+import { guardedFetch } from "./url-guard.js";
 
 /** Result of extracting text from a PDF document. */
 export type PdfExtractResult = {
@@ -50,8 +51,21 @@ export async function extractPdfFromBuffer(
     };
 }
 
+/**
+ * Downloads a stored PDF.
+ *
+ * Guarded even though the URL comes from our own upload rather than a reader.
+ * `fileUrl` is a value read back out of a row that has been sitting in the
+ * database across several schema versions, and a reprocess run months later
+ * will fetch whatever it now says. Treating it as trusted because of where it
+ * originally came from is the assumption these bugs are made of.
+ *
+ * @param url - Storage URL to fetch
+ * @returns The file bytes
+ * @throws When the address is not fetchable or the download fails
+ */
 async function downloadPdf(url: string) {
-    const response = await fetch(url);
+    const response = await guardedFetch(url);
 
     if (!response.ok) {
         throw new Error(`Failed to download PDF (${response.status})`);

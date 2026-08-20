@@ -248,3 +248,53 @@ export async function deleteUserMemory(userId: string, memoryId: string) {
     getMem0Client().delete(memoryId),
   );
 }
+
+/**
+ * Removes every memory the provider holds for a user.
+ *
+ * Deleting one at a time rather than through a bulk endpoint, because the
+ * provider's bulk delete is filter-based and a filter that silently matches
+ * nothing is indistinguishable from one that deleted everything — which is the
+ * exact question an account deletion has to answer truthfully.
+ *
+ * Paged until the provider reports nothing left, so an account with more
+ * memories than one page holds is fully cleared rather than mostly.
+ *
+ * @param userId - Owner of the memories
+ * @returns How many memories were removed
+ * @throws When the provider refuses, so the deletion receipt records the failure
+ */
+export async function deleteAllUserMemories(userId: string): Promise<number> {
+  if (!process.env.MEM0_API_KEY?.trim()) {
+    return 0;
+  }
+
+  const client = getMem0Client();
+  let removed = 0;
+
+  // Bounded so a provider that keeps returning the same page cannot spin here
+  // forever; 100 passes of 100 is far beyond any real account.
+  for (let pass = 0; pass < 100; pass += 1) {
+    const batch = await withTimeout(
+      "Mem0 memory list",
+      15_000,
+      client.getAll({
+        filters: { user_id: userId },
+        page: 1,
+        pageSize: 100,
+      }),
+    );
+
+    if (batch.results.length === 0) {
+      return removed;
+    }
+
+    for (const record of batch.results) {
+      const memory = providerMemorySchema.parse(record);
+      await withTimeout("Mem0 memory delete", 10_000, client.delete(memory.id));
+      removed += 1;
+    }
+  }
+
+  throw new Error("Mem0 did not stop returning memories for this user");
+}

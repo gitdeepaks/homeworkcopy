@@ -213,6 +213,7 @@ const FORBIDDEN_MESSAGES: Readonly<Record<NotebookPermission, string>> = {
     "note:update": "You have view-only access, so you cannot edit notes.",
     "note:delete": "You have view-only access, so you cannot delete notes.",
     "member:read": "You do not have access to this notebook's members.",
+    "notebook:export": "You do not have access to this notebook.",
     "member:manage": "Only the notebook owner can manage who has access.",
     "share:manage": "Only the notebook owner can change sharing.",
     "audit:read": "Only the notebook owner can see notebook activity.",

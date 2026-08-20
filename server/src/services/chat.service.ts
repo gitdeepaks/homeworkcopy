@@ -66,10 +66,12 @@ import {
     searchWeb,
 } from "../lib/tavily.js";
 import {
+    ForbiddenError,
     NotFoundError,
     ValidationError,
     WebSearchUnavailableError,
 } from "../types/app-error.js";
+import { resolvePrivacyPreferences } from "./privacy.service.js";
 import {
     buildConversationTitle,
     getLastUserMessageText,
@@ -474,6 +476,17 @@ export async function streamWorkspaceChat(
     const chatModel =
         CHAT_MODELS.find((model) => model === requestedModel) ?? CHAT_MODEL;
     const webSearchEnabled = input.groundingMode === "notebook-web";
+
+    // Consent is read here, on every turn, rather than cached anywhere: turning
+    // a provider off has to take effect on the reader's next question, not
+    // whenever some session happens to expire.
+    const privacy = await resolvePrivacyPreferences(userId);
+
+    if (webSearchEnabled && !privacy.webSearch) {
+        throw new ForbiddenError(
+            "Web grounding is turned off in your privacy settings. Turn it on to search the web, or ask in notebook-only mode.",
+        );
+    }
     if (webSearchEnabled && !process.env.TAVILY_API_KEY?.trim()) {
         throw new WebSearchUnavailableError();
     }
@@ -558,7 +571,12 @@ export async function streamWorkspaceChat(
                 sourceIds: resolvedSourceIds,
                 query: retrievalQuery,
             }),
-            searchUserMemories(userId, userText),
+            // Recall is skipped entirely without consent, rather than fetched
+            // and discarded: sending the question to the memory provider is the
+            // thing the reader declined.
+            privacy.learnedMemory
+                ? searchUserMemories(userId, userText)
+                : Promise.resolve([]),
         ]);
     } catch (error) {
         await releaseConversationGeneration(conversation.id, generationLeaseId);
@@ -777,22 +795,26 @@ export async function streamWorkspaceChat(
                     logger.warn({ error, conversationId: conversation.id }, "conversation summary enqueue failed");
                 });
 
-            void addMemoriesFromMessages(
-                userId,
-                [
-                    { role: "user", content: userText },
-                    { role: "assistant", content: assistantText },
-                ],
-                {
-                    source: "learned",
-                    conversationId: conversation.id,
-                },
-            ).catch((error) => {
-                logger.warn(
-                    { error, conversationId: conversation.id, userId },
-                    "Mem0 add failed",
-                );
-            });
+            // Learning from a turn sends both halves of it to the memory
+            // provider, which is exactly what this preference governs.
+            if (privacy.learnedMemory) {
+                void addMemoriesFromMessages(
+                    userId,
+                    [
+                        { role: "user", content: userText },
+                        { role: "assistant", content: assistantText },
+                    ],
+                    {
+                        source: "learned",
+                        conversationId: conversation.id,
+                    },
+                ).catch((error) => {
+                    logger.warn(
+                        { error, conversationId: conversation.id, userId },
+                        "Mem0 add failed",
+                    );
+                });
+            }
         },
     });
 
