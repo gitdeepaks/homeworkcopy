@@ -4,12 +4,9 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { NotebookScope } from "@homeworkcopy/contracts";
-import {
-    BookOpenIcon,
-    MessageSquareIcon,
-    SearchIcon,
-    SparklesIcon,
-} from "lucide-react";
+import { formatDistanceToNow } from "date-fns";
+import { PlusIcon, SearchIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AccountMenu } from "@/features/auth/components/account-menu";
@@ -33,29 +30,29 @@ type DashboardHomeProps = {
     userName?: string | null;
 };
 
-const FEATURES = [
-    {
-        icon: BookOpenIcon,
-        title: "Upload sources",
-        description: "PDFs, websites, YouTube, and notes in one place",
-    },
-    {
-        icon: MessageSquareIcon,
-        title: "Chat with context",
-        description: "Ask questions grounded in your materials",
-    },
-    {
-        icon: SparklesIcon,
-        title: "Create outputs",
-        description:
-            "Build flashcards, quizzes, mind maps, and summaries in Studio",
-    },
-] as const;
-
 const SCOPES: readonly { value: NotebookScope; label: string }[] = [
     { value: "mine", label: "Mine" },
     { value: "shared", label: "Shared with me" },
 ];
+
+/**
+ * When anything in the shelf was last touched, phrased for a masthead.
+ *
+ * Returns `null` while the lists are still loading or genuinely empty, so the
+ * figure line can leave the slot out rather than print a placeholder dash.
+ */
+function lastTouched(...lists: readonly (readonly Workspace[] | undefined)[]): string | null {
+    const timestamps = lists
+        .flatMap((list) => list ?? [])
+        .map((notebook) => new Date(notebook.updatedAt).getTime())
+        .filter((time) => Number.isFinite(time));
+
+    if (timestamps.length === 0) return null;
+
+    return formatDistanceToNow(new Date(Math.max(...timestamps)), {
+        addSuffix: true,
+    });
+}
 
 /**
  * Filters a tab's notebooks by the search box.
@@ -112,59 +109,83 @@ export function DashboardHome({ userName }: DashboardHomeProps) {
 
     const greeting = userName?.split(" ")[0] ?? "there";
     const sharedCount = shared.data?.length ?? 0;
+    const ownedCount = mine.data?.length ?? 0;
+    const activity = lastTouched(mine.data, shared.data);
 
     return (
         <div className="notebook-canvas min-h-svh">
+            {/* Running head. It stays put while the shelf scrolls under it, so
+                the page always says which publication you are inside. */}
             <header
                 data-print-hidden
-                className="sticky top-0 z-20 border-b bg-paper/90 backdrop-blur-md"
+                className="sticky top-0 z-20 border-b border-hairline bg-paper/85 backdrop-blur-md"
             >
-                <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-4 px-4 md:px-8">
+                <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-4 px-5 md:px-8">
                     <Link
                         href={workspaceRoutes.list}
-                        className="flex min-h-11 items-center font-heading text-2xl font-bold tracking-tight"
+                        className="marginalia press-underline text-ink"
                     >
-                        <span className="ink-highlight">Homeworkcopy</span>
+                        Homeworkcopy
                     </Link>
 
-                    <AccountMenu />
+                    <div className="flex items-center gap-2">
+                        <Button
+                            size="sm"
+                            className="hidden gap-2 rounded-sm sm:inline-flex"
+                            onClick={() => setCreateOpen(true)}
+                        >
+                            <PlusIcon className="size-4" />
+                            New notebook
+                        </Button>
+                        <AccountMenu />
+                    </div>
                 </div>
             </header>
 
             <main
                 id="main-content"
-                className="mx-auto max-w-6xl px-4 py-8 md:px-8 md:py-10"
+                className="mx-auto max-w-6xl px-5 py-10 md:px-8 md:py-14"
             >
-                <section className="mb-10 space-y-6">
-                    <div className="space-y-2">
-                        <p className="font-heading text-xl font-medium text-primary">
-                            Welcome back, {greeting}
-                        </p>
-                        <h1 className="font-heading text-5xl font-bold tracking-tight md:text-6xl">
-                            Your notebooks
-                        </h1>
-                        <p className="max-w-2xl text-sm text-muted-foreground md:text-base">
-                            Organize sources, chat with your materials, and
-                            create outputs, all in one notebook.
-                        </p>
-                    </div>
+                {/* Masthead. A returning reader does not need the feature tour
+                    they already bought — they need to know the state of the
+                    shelf, so the copy is replaced by a figure line. */}
+                <section className="mb-12">
+                    <p className="marginalia">
+                        <span className="text-primary">§</span> Welcome back,{" "}
+                        {greeting}
+                    </p>
+                    <h1 className="mt-5 font-display text-[clamp(2.75rem,7vw,4.5rem)] leading-[0.92] font-semibold tracking-[-0.032em]">
+                        Your notebooks
+                    </h1>
 
-                    <div className="grid gap-3 sm:grid-cols-3">
-                        {FEATURES.map((feature) => (
-                            <div
-                                key={feature.title}
-                                className="paper-tab rounded-r-md p-4 shadow-sm"
+                    <dl className="mt-9 flex flex-wrap items-baseline gap-x-10 gap-y-4 border-t border-hairline pt-5">
+                        <div className="flex items-baseline gap-2.5">
+                            <dd
+                                data-numeric
+                                className="font-display text-3xl font-semibold text-primary"
                             >
-                                <feature.icon className="mb-2 size-4 text-primary" />
-                                <p className="text-sm font-medium">
-                                    {feature.title}
-                                </p>
-                                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                                    {feature.description}
-                                </p>
+                                {ownedCount}
+                            </dd>
+                            <dt className="marginalia">Owned</dt>
+                        </div>
+                        <div className="flex items-baseline gap-2.5">
+                            <dd
+                                data-numeric
+                                className="font-display text-3xl font-semibold"
+                            >
+                                {sharedCount}
+                            </dd>
+                            <dt className="marginalia">Shared with you</dt>
+                        </div>
+                        {activity ? (
+                            <div className="flex items-baseline gap-2.5">
+                                <dt className="marginalia">Last edited</dt>
+                                <dd className="font-mono text-xs text-graphite">
+                                    {activity}
+                                </dd>
                             </div>
-                        ))}
-                    </div>
+                        ) : null}
+                    </dl>
                 </section>
 
                 <Tabs
@@ -178,18 +199,24 @@ export function DashboardHome({ userName }: DashboardHomeProps) {
                     }}
                     className="space-y-5"
                 >
-                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                        <TabsList aria-label="Notebook scope">
+                    <div className="flex flex-col gap-4 border-b border-hairline pb-4 sm:flex-row sm:items-center sm:justify-between">
+                        <TabsList
+                            aria-label="Notebook scope"
+                            className="h-auto gap-1 rounded-sm bg-transparent p-0"
+                        >
                             {SCOPES.map((option) => (
                                 <TabsTrigger
                                     key={option.value}
                                     value={option.value}
-                                    className="min-h-11 px-4"
+                                    className="min-h-11 rounded-sm px-4 font-mono text-xs tracking-widest uppercase data-[state=active]:bg-secondary data-[state=active]:shadow-none"
                                 >
                                     {option.label}
                                     {option.value === "shared" &&
                                     sharedCount > 0 ? (
-                                        <span className="ml-1 text-xs text-muted-foreground">
+                                        <span
+                                            data-numeric
+                                            className="ml-2 text-primary"
+                                        >
                                             {sharedCount}
                                         </span>
                                     ) : null}
@@ -200,16 +227,16 @@ export function DashboardHome({ userName }: DashboardHomeProps) {
                         <div className="relative w-full sm:max-w-xs">
                             <SearchIcon
                                 aria-hidden
-                                className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+                                className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-graphite"
                             />
                             <Input
                                 value={search}
                                 onChange={(event) =>
                                     setSearch(event.target.value)
                                 }
-                                placeholder="Search notebooks..."
+                                placeholder="Search notebooks"
                                 aria-label="Search notebooks"
-                                className="rounded-full bg-background pl-9"
+                                className="min-h-11 rounded-sm border-hairline bg-paper pl-9 font-mono text-xs"
                             />
                         </div>
                     </div>

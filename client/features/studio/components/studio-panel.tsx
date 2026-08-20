@@ -62,19 +62,19 @@ export function StudioPanel({ workspaceId }: StudioPanelProps) {
             aria-labelledby="studio-panel-title"
             className="flex h-full min-h-0 flex-col bg-panel/95"
         >
-            <div className="border-b px-4 py-3">
+            <div className="border-b border-hairline px-4 py-3">
                 <div className="flex items-center justify-between gap-2">
                     <div>
                         <h2
                             id="studio-panel-title"
-                            className="font-heading text-xl font-bold"
+                            className="font-display text-xl font-semibold tracking-[-0.02em]"
                         >
                             Studio
                         </h2>
-                        <p className="text-xs text-muted-foreground">
+                        <p className="mt-0.5 text-xs text-graphite">
                             Study tools and saved outputs
                         </p>
-                        <p className="mt-1 text-xs text-muted-foreground">
+                        <p className="marginalia mt-1">
                             {selection.effectiveSourceIds.length} source
                             {selection.effectiveSourceIds.length === 1
                                 ? ""
@@ -99,7 +99,7 @@ export function StudioPanel({ workspaceId }: StudioPanelProps) {
             <div
                 role="tablist"
                 aria-label="Studio sections"
-                className="flex gap-1 border-b px-3 py-2"
+                className="flex gap-1 border-b border-hairline px-3 py-2"
             >
                 {STUDIO_SECTIONS.map((option) => (
                     <button

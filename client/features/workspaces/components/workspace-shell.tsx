@@ -87,9 +87,9 @@ export function WorkspaceShell({ workspace, children }: WorkspaceShellProps) {
 
     function persistLayout(layout: { [id: string]: number }) {
         const panelLayout: NotebookPanelLayout = {
-            sources: layout.sources ?? viewState.panelLayout.sources,
-            chat: layout.chat ?? viewState.panelLayout.chat,
-            studio: layout.studio ?? viewState.panelLayout.studio,
+            sources: layout["sources"] ?? viewState.panelLayout.sources,
+            chat: layout["chat"] ?? viewState.panelLayout.chat,
+            studio: layout["studio"] ?? viewState.panelLayout.studio,
         };
         setPanelLayout(workspace.id, panelLayout);
     }
@@ -100,26 +100,42 @@ export function WorkspaceShell({ workspace, children }: WorkspaceShellProps) {
             <div className="ruled-paper flex min-h-0 flex-1 flex-col overflow-hidden rounded-none md:rounded-md">
                 <header
                     data-print-hidden
-                    className="z-10 flex min-h-14 items-center gap-2 border-b bg-paper/95 px-2 backdrop-blur-sm sm:px-3"
+                    className="z-10 flex min-h-14 items-center gap-2 border-b border-hairline bg-paper/85 px-2 backdrop-blur-md sm:px-3"
                 >
                     <Button
                         nativeButton={false}
                         variant="ghost"
                         size="icon-sm"
+                        className="rounded-sm text-graphite"
                         render={<Link href={workspaceRoutes.list} />}
                     >
                         <ArrowLeftIcon />
                         <span className="sr-only">Back to notebooks</span>
                     </Button>
-                    <span aria-hidden className="text-lg">{workspace.icon ?? "📚"}</span>
+
+                    <span
+                        aria-hidden="true"
+                        className="mx-1 hidden h-5 w-px bg-hairline sm:block"
+                    />
+
+                    <span aria-hidden className="text-base">
+                        {workspace.icon ?? "§"}
+                    </span>
                     <div className="min-w-0 flex-1">
-                        <h1 className="truncate font-heading text-lg font-bold sm:text-xl">{workspace.title}</h1>
+                        <h1 className="truncate font-display text-lg font-semibold tracking-[-0.02em] sm:text-xl">
+                            {workspace.title}
+                        </h1>
                     </div>
+
+                    {/* Panel toggles, set as one segmented control so the two
+                        edges of the workspace read as a pair rather than as two
+                        unrelated icon buttons. */}
                     {integrated ? (
-                        <div className="hidden items-center gap-1 lg:flex">
+                        <div className="hidden items-center rounded-sm border border-hairline lg:flex">
                             <Button
                                 variant="ghost"
                                 size="icon-sm"
+                                className="rounded-none rounded-l-sm text-graphite aria-pressed:bg-secondary aria-pressed:text-ink"
                                 onClick={() =>
                                     setPanelCollapsed(
                                         workspace.id,
@@ -127,14 +143,21 @@ export function WorkspaceShell({ workspace, children }: WorkspaceShellProps) {
                                         !viewState.sourcesCollapsed,
                                     )
                                 }
-                                aria-pressed={viewState.sourcesCollapsed}
+                                aria-pressed={!viewState.sourcesCollapsed}
                             >
                                 <PanelLeftCloseIcon />
-                                <span className="sr-only">Toggle Sources panel</span>
+                                <span className="sr-only">
+                                    Toggle Sources panel
+                                </span>
                             </Button>
+                            <span
+                                aria-hidden="true"
+                                className="h-5 w-px bg-hairline"
+                            />
                             <Button
                                 variant="ghost"
                                 size="icon-sm"
+                                className="rounded-none rounded-r-sm text-graphite aria-pressed:bg-secondary aria-pressed:text-ink"
                                 onClick={() =>
                                     setPanelCollapsed(
                                         workspace.id,
@@ -142,13 +165,16 @@ export function WorkspaceShell({ workspace, children }: WorkspaceShellProps) {
                                         !viewState.studioCollapsed,
                                     )
                                 }
-                                aria-pressed={viewState.studioCollapsed}
+                                aria-pressed={!viewState.studioCollapsed}
                             >
                                 <PanelRightCloseIcon />
-                                <span className="sr-only">Toggle Studio panel</span>
+                                <span className="sr-only">
+                                    Toggle Studio panel
+                                </span>
                             </Button>
                         </div>
                     ) : null}
+
                     <WorkspaceHeaderActions workspace={workspace} />
                     <AccountMenu />
                 </header>
@@ -218,7 +244,7 @@ export function WorkspaceShell({ workspace, children }: WorkspaceShellProps) {
                                 </ResizablePanelGroup>
                             </div>
 
-                            <div role="tablist" aria-label="Notebook sections" className="fixed inset-x-0 bottom-0 z-20 grid h-[calc(3.5rem+env(safe-area-inset-bottom))] grid-cols-3 border-t bg-paper/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden">
+                            <div role="tablist" aria-label="Notebook sections" className="fixed inset-x-0 bottom-0 z-20 grid h-[calc(3.5rem+env(safe-area-inset-bottom))] grid-cols-3 border-t border-hairline bg-paper/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md lg:hidden">
                                 {NOTEBOOK_TABS.map((tab) => {
                                     const details = TAB_DETAILS[tab];
                                     const Icon = details.icon;
@@ -235,7 +261,16 @@ export function WorkspaceShell({ workspace, children }: WorkspaceShellProps) {
                                             aria-controls={`notebook-${tab}-panel`}
                                             aria-selected={selected}
                                             tabIndex={selected ? 0 : -1}
-                                            className={cn("relative flex min-h-11 items-center justify-center gap-1.5 border-t-4 px-2 text-sm", selected ? "border-t-margin-line bg-primary/5 font-semibold text-primary" : "border-t-transparent text-muted-foreground")}
+                                            className={cn(
+                                                "relative flex min-h-11 items-center justify-center gap-1.5 px-2 font-mono text-[0.7rem] tracking-widest uppercase transition-colors",
+                                                // The selected tab is marked by a
+                                                // rule at the edge it belongs to,
+                                                // not by a filled block.
+                                                "before:absolute before:inset-x-0 before:top-0 before:h-0.5 before:transition-colors",
+                                                selected
+                                                    ? "font-semibold text-primary before:bg-primary"
+                                                    : "text-graphite before:bg-transparent",
+                                            )}
                                             onClick={() => setMobileTab(workspace.id, tab)}
                                             onKeyDown={(event) => {
                                                 if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;

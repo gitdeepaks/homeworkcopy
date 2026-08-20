@@ -26,9 +26,9 @@ import { cn } from "@/lib/utils";
 
 type SourceCardProps = {
     source: Source;
-    onDelete?: (source: Source) => void;
-    onReprocess?: (source: Source) => void;
-    className?: string;
+    onDelete?: ((source: Source) => void) | undefined;
+    onReprocess?: ((source: Source) => void) | undefined;
+    className?: string | undefined;
 };
 
 export function SourceCard({

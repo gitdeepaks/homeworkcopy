@@ -81,11 +81,11 @@ export function SourcesPanel({ workspaceId }: SourcesPanelProps) {
 
     return (
         <section aria-labelledby="sources-panel-title" className="flex h-full min-h-0 flex-col bg-panel/95">
-            <div className="border-b px-4 py-3">
+            <div className="border-b border-hairline px-4 py-3">
                 <div className="flex items-center justify-between gap-2">
                     <div>
-                        <h2 id="sources-panel-title" className="font-heading text-xl font-bold">Sources</h2>
-                        <p className="text-xs text-muted-foreground">{sources.length} notebook references</p>
+                        <h2 id="sources-panel-title" className="font-display text-xl font-semibold tracking-[-0.02em]">Sources</h2>
+                        <p className="marginalia mt-1">{sources.length} references</p>
                     </div>
                     {canAddSources ? (
                         <Button

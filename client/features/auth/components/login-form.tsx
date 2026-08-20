@@ -5,19 +5,6 @@ import { useSearchParams } from "next/navigation";
 import { useSignIn } from "@clerk/nextjs";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import {
-    Card,
-    CardContent,
-    CardDescription,
-    CardHeader,
-    CardTitle,
-} from "@/components/ui/card";
-import {
-    Field,
-    FieldDescription,
-    FieldGroup,
-    FieldSeparator,
-} from "@/components/ui/field";
 import { Spinner } from "@/components/ui/spinner";
 import { authRoutes } from "../lib/auth-routes";
 
@@ -68,12 +55,24 @@ export function LoginForm({
         setIsLoading(true);
         setError(null);
 
+        // `sso()` reports a rejected sign-in by returning an error rather than
+        // throwing, so the result has to be read. A `catch` alone would leave a
+        // refused sign-in as a button that spins forever and says nothing.
+        // On success the browser leaves for the provider, so there is no
+        // success branch to write.
         try {
-            await signIn.sso({
+            const { error } = await signIn.sso({
                 strategy: "oauth_google",
                 redirectUrl: callbackUrl,
                 redirectCallbackUrl: "/sso-callback",
             });
+
+            if (error) {
+                // `longMessage` is the copy Clerk writes for readers;
+                // `message` is addressed to whoever is debugging.
+                setError(error.longMessage ?? error.message);
+                setIsLoading(false);
+            }
         } catch (error) {
             setError(
                 error instanceof Error
@@ -85,63 +84,56 @@ export function LoginForm({
     }
 
     return (
-        <div className={cn("flex flex-col gap-6", className)} {...props}>
-            <Card className="paper-sheet overflow-hidden rounded-md border-border px-3 py-7 shadow-lg sm:px-7">
-                <CardHeader className="text-center">
-                    <p className="font-heading text-3xl font-bold text-primary lg:hidden">
-                        Homeworkcopy
-                    </p>
-                    <CardTitle className="font-heading text-4xl font-bold">
-                        Welcome back
-                    </CardTitle>
-                    <CardDescription>
-                        Pick up where you left off in your notebooks.
-                    </CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <form
-                        onSubmit={(event) => {
-                            event.preventDefault();
-                            void handleGoogleSignIn();
-                        }}
+        <div className={cn("flex flex-col", className)} {...props}>
+            <header>
+                <p className="marginalia lg:hidden">Homeworkcopy</p>
+                <h1 className="mt-6 font-display text-5xl font-semibold tracking-[-0.03em] lg:mt-0">
+                    Welcome back
+                </h1>
+                <p className="mt-3 text-sm leading-relaxed text-graphite">
+                    Pick up where you left off in your notebooks.
+                </p>
+            </header>
+
+            <form
+                className="mt-10"
+                onSubmit={(event) => {
+                    event.preventDefault();
+                    void handleGoogleSignIn();
+                }}
+            >
+                <Button
+                    type="submit"
+                    variant="outline"
+                    className="min-h-12 w-full gap-3 rounded-sm border-hairline bg-paper text-base font-medium shadow-none transition-colors hover:border-primary hover:bg-accent/50"
+                    disabled={isLoading}
+                >
+                    {isLoading ? <Spinner /> : <GoogleIcon />}
+                    Continue with Google
+                </Button>
+
+                {/* Clerk mounts its bot check here when one is required; it has
+                    to exist in the DOM before the sign-in call is made. */}
+                <div
+                    id="clerk-captcha"
+                    className="flex min-h-0 justify-center empty:hidden"
+                />
+
+                {error ? (
+                    <p
+                        role="alert"
+                        className="mt-5 border-l-2 border-destructive bg-destructive/8 px-3 py-2 text-sm text-destructive"
                     >
-                        <FieldGroup>
-                            <Field>
-                                <Button
-                                    type="submit"
-                                    variant="outline"
-                                    className="min-h-12 w-full bg-paper text-base shadow-sm"
-                                    disabled={isLoading}
-                                >
-                                    {isLoading ? (
-                                        <Spinner />
-                                    ) : (
-                                        <GoogleIcon />
-                                    )}
-                                    Continue with Google
-                                </Button>
-                                <FieldDescription className="text-center">
-                                    By continuing, you agree to our terms of
-                                    service and privacy policy.
-                                </FieldDescription>
-                            </Field>
-                            <FieldSeparator>Secure sign-in</FieldSeparator>
-                            <div
-                                id="clerk-captcha"
-                                className="flex min-h-0 justify-center"
-                            />
-                            {error ? (
-                                <p
-                                    role="alert"
-                                    className="text-center text-sm text-destructive"
-                                >
-                                    {error}
-                                </p>
-                            ) : null}
-                        </FieldGroup>
-                    </form>
-                </CardContent>
-            </Card>
+                        {error}
+                    </p>
+                ) : null}
+
+                <p className="mt-8 border-t border-hairline pt-5 text-xs leading-relaxed text-graphite">
+                    By continuing you agree to our terms of service and privacy
+                    policy. Sign-in is handled by Google; we never see your
+                    password.
+                </p>
+            </form>
         </div>
     );
 }

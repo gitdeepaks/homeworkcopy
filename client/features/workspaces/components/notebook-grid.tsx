@@ -2,15 +2,7 @@
 
 import type { NotebookScope } from "@homeworkcopy/contracts";
 import { Button } from "@/components/ui/button";
-import {
-    Empty,
-    EmptyContent,
-    EmptyDescription,
-    EmptyHeader,
-    EmptyTitle,
-} from "@/components/ui/empty";
-import { Skeleton } from "@/components/ui/skeleton";
-import { ApiError } from "@/shared/lib/api";
+import { errorMessage } from "@/shared/lib/errors";
 import { CreateWorkspaceCard } from "./create-workspace-card";
 import { WorkspaceCard } from "./workspace-card";
 import type { Workspace } from "../lib/types";
@@ -19,8 +11,12 @@ type NotebookGridProps = {
     scope: NotebookScope;
     notebooks: Workspace[] | undefined;
     isLoading: boolean;
-    error: unknown;
-    /** `null` when the query returned nothing at all, rather than a bad search. */
+    /**
+     * The query's own error. React Query narrows this to `Error` for us, so it
+     * arrives already typed rather than as something to interrogate.
+     */
+    error: Error | null;
+    /** Empty when the tab is genuinely empty rather than filtered to nothing. */
     searchQuery: string;
     onCreate: () => void;
     onClearSearch: () => void;
@@ -28,6 +24,29 @@ type NotebookGridProps = {
     onDelete: (workspace: Workspace) => void;
     onLeave: (workspace: Workspace) => void;
 };
+
+/** A ruled-off notice, used for every state that is not a shelf of notebooks. */
+function Notice({
+    title,
+    body,
+    action,
+}: {
+    title: string;
+    body: string;
+    action?: React.ReactNode;
+}) {
+    return (
+        <div className="border-t border-hairline py-16 text-center">
+            <h3 className="font-display text-2xl font-semibold tracking-tight">
+                {title}
+            </h3>
+            <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-graphite">
+                {body}
+            </p>
+            {action ? <div className="mt-6">{action}</div> : null}
+        </div>
+    );
+}
 
 /**
  * One dashboard tab's notebooks, with every state it can be in.
@@ -51,65 +70,60 @@ export function NotebookGrid({
         return (
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {Array.from({ length: 6 }).map((_, index) => (
-                    <Skeleton
+                    <div
                         key={index}
-                        className="min-h-[196px] rounded-3xl"
+                        aria-hidden="true"
+                        className="min-h-[13rem] animate-pulse rounded-sm border border-hairline bg-paper/60"
                     />
                 ))}
+                <span className="sr-only" role="status">
+                    Loading notebooks
+                </span>
             </div>
         );
     }
 
     if (error) {
         return (
-            <Empty className="rounded-3xl border bg-card">
-                <EmptyHeader>
-                    <EmptyTitle>Could not load notebooks</EmptyTitle>
-                    <EmptyDescription>
-                        {error instanceof ApiError
-                            ? error.message
-                            : "Please try again in a moment."}
-                    </EmptyDescription>
-                </EmptyHeader>
-            </Empty>
+            <Notice
+                title="Could not load notebooks"
+                body={errorMessage(error, "Please try again in a moment.")}
+            />
         );
     }
 
     const all = notebooks ?? [];
     const hasSearch = searchQuery.trim().length > 0;
 
-    if (scope === "shared" && all.length === 0 && !hasSearch) {
+    if (all.length === 0 && hasSearch) {
         return (
-            <Empty className="rounded-3xl border bg-card">
-                <EmptyHeader>
-                    <EmptyTitle>Nothing shared with you yet</EmptyTitle>
-                    <EmptyDescription>
-                        When someone invites you to their notebook, it will
-                        appear here.
-                    </EmptyDescription>
-                </EmptyHeader>
-            </Empty>
+            <Notice
+                title="Nothing matched"
+                body={`No notebook here mentions “${searchQuery.trim()}”.`}
+                action={
+                    <Button
+                        variant="outline"
+                        className="rounded-sm"
+                        onClick={onClearSearch}
+                    >
+                        Clear search
+                    </Button>
+                }
+            />
         );
     }
 
-    if (all.length === 0 && hasSearch) {
+    if (scope === "shared" && all.length === 0) {
         return (
-            <Empty className="rounded-3xl border bg-card">
-                <EmptyHeader>
-                    <EmptyTitle>No notebooks found</EmptyTitle>
-                    <EmptyDescription>
-                        Try a different search term.
-                    </EmptyDescription>
-                </EmptyHeader>
-                <EmptyContent>
-                    <Button onClick={onClearSearch}>Clear search</Button>
-                </EmptyContent>
-            </Empty>
+            <Notice
+                title="Nothing shared with you yet"
+                body="When someone invites you to their notebook, it appears on this shelf."
+            />
         );
     }
 
     return (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {scope === "mine" ? (
                 <CreateWorkspaceCard onClick={onCreate} />
             ) : null}
