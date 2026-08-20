@@ -2,7 +2,7 @@
  * Inngest event helpers for background source processing (RAG indexing).
  */
 
-import { inngest } from "../inngest/client.js";
+import { sendInngestEvent } from "../inngest/client.js";
 
 /**
  * Enqueues a source processing job to run asynchronously via Inngest.
@@ -18,7 +18,7 @@ export async function enqueueSourceProcessing(input: {
     workspaceId: string;
     processingVersion: number;
 }) {
-    await inngest.send({
+    await sendInngestEvent({
         id: `source-process:${input.sourceId}:v${input.processingVersion}`,
         name: "source/created",
         data: input,
@@ -29,7 +29,7 @@ export async function enqueueSourceDeletion(input: {
     sourceId: string;
     workspaceId: string;
 }) {
-    await inngest.send({
+    await sendInngestEvent({
         name: "source/delete",
         data: input,
     });

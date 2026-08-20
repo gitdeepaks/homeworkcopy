@@ -8,6 +8,7 @@ import {
 } from "./collaboration.routes.js";
 import { memoryRoutes } from "./memory.routes.js";
 import { noteRoutes } from "./note.routes.js";
+import { privacyRoutes } from "./privacy.routes.js";
 import { sourceRoutes } from "./source.routes.js";
 import { workspaceRoutes } from "./workspace.routes.js";
 
@@ -22,4 +23,5 @@ export function registerRoutes(app: Express): void {
     app.use("/api", shareRedemptionRoutes);
     app.use("/api/memory", memoryRoutes);
     app.use("/api/capabilities", capabilityRoutes);
+    app.use("/api/privacy", privacyRoutes);
 }

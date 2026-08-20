@@ -2,7 +2,7 @@
  * Inngest event helpers for background Studio output generation.
  */
 
-import { inngest } from "../inngest/client.js";
+import { sendInngestEvent } from "../inngest/client.js";
 
 /**
  * Enqueues an output generation job to run asynchronously via Inngest.
@@ -18,7 +18,7 @@ export async function enqueueArtifactGeneration(input: {
     workspaceId: string;
     attempt: number;
 }) {
-    await inngest.send({
+    await sendInngestEvent({
         name: "artifact/generate",
         data: input,
     });
@@ -37,7 +37,7 @@ export async function enqueueArtifactMediaCleanup(input: {
     workspaceId: string;
     publicId: string;
 }) {
-    await inngest.send({
+    await sendInngestEvent({
         name: "artifact/media-cleanup",
         data: input,
     });

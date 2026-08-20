@@ -2,7 +2,7 @@
  * Inngest event helpers for background conversation summarization.
  */
 
-import { inngest } from "../inngest/client.js";
+import { sendInngestEvent } from "../inngest/client.js";
 
 /**
  * Enqueues a conversation summary job to run asynchronously via Inngest.
@@ -17,7 +17,7 @@ export async function enqueueConversationSummarize(input: {
     conversationId: string;
     userId: string;
 }) {
-    await inngest.send({
+    await sendInngestEvent({
         name: "conversation/summarize",
         data: input,
     });
