@@ -13,9 +13,9 @@ export type { NotebookScope };
 
 export type CreateWorkspaceInput = {
     title: string;
-    description?: string;
-    icon?: string;
-    defaultModel?: string;
+    description?: string | undefined;
+    icon?: string | undefined;
+    defaultModel?: string | undefined;
 };
 
 export type UpdateWorkspaceInput = Partial<CreateWorkspaceInput>;

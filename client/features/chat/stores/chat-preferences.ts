@@ -18,8 +18,8 @@ export function isChatModelId(model: string | null): model is ChatModelId {
 
 type StoredWorkspaceChatPrefs = {
     model: ChatModelId;
-    groundingMode?: GroundingMode;
-    webSearch?: boolean;
+    groundingMode?: GroundingMode | undefined;
+    webSearch?: boolean | undefined;
 };
 
 type WorkspaceChatPrefs = {

@@ -53,7 +53,15 @@ function shuffleOrder(length: number) {
 
     for (let i = order.length - 1; i > 0; i -= 1) {
         const j = Math.floor(Math.random() * (i + 1));
-        [order[i], order[j]] = [order[j], order[i]];
+        const atI = order[i];
+        const atJ = order[j];
+
+        // Both indices are inside the array by construction. Reading them out
+        // first is what says so to the compiler, and costs nothing at run time.
+        if (atI === undefined || atJ === undefined) continue;
+
+        order[i] = atJ;
+        order[j] = atI;
     }
 
     return order;
@@ -77,8 +85,10 @@ export function FlashcardsViewer({ cards }: { cards: readonly Flashcard[] }) {
         setKnown(new Set());
     }, [cards]);
 
+    // Two hops: the shuffled order gives a card index, the index gives a card.
+    // Either can miss on an empty deck, so both are resolved as one step.
     const cardIndex = order[position];
-    const card = cards[cardIndex];
+    const card = cardIndex === undefined ? undefined : cards[cardIndex];
 
     const goTo = useCallback(
         (nextDirection: number) => {
@@ -99,6 +109,8 @@ export function FlashcardsViewer({ cards }: { cards: readonly Flashcard[] }) {
     const flip = useCallback(() => setFlipped((value) => !value), []);
 
     const markKnown = useCallback(() => {
+        if (cardIndex === undefined) return;
+
         setKnown((current) => {
             const next = new Set(current);
             next.add(cardIndex);
@@ -108,6 +120,8 @@ export function FlashcardsViewer({ cards }: { cards: readonly Flashcard[] }) {
     }, [cardIndex, goTo]);
 
     const markUnknown = useCallback(() => {
+        if (cardIndex === undefined) return;
+
         setKnown((current) => {
             if (!current.has(cardIndex)) {
                 return current;
@@ -136,9 +150,10 @@ export function FlashcardsViewer({ cards }: { cards: readonly Flashcard[] }) {
 
     useEffect(() => {
         function handleKeyDown(event: KeyboardEvent) {
-            const target = event.target as HTMLElement | null;
+            // Typing into a field is not deck navigation.
+            const target = event.target;
             if (
-                target &&
+                target instanceof HTMLElement &&
                 ["INPUT", "TEXTAREA"].includes(target.tagName)
             ) {
                 return;
@@ -161,7 +176,7 @@ export function FlashcardsViewer({ cards }: { cards: readonly Flashcard[] }) {
     }, [goTo, flip]);
 
     const handleDragEnd = useCallback(
-        (_event: unknown, info: PanInfo) => {
+        (_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
             const { offset, velocity } = info;
 
             if (
@@ -188,7 +203,7 @@ export function FlashcardsViewer({ cards }: { cards: readonly Flashcard[] }) {
         [known.size, cards.length],
     );
 
-    if (!card) {
+    if (card === undefined || cardIndex === undefined) {
         return (
             <p className="py-10 text-center text-sm text-muted-foreground">
                 This deck has no cards.

@@ -60,8 +60,8 @@ type QueueBase = {
     id: string;
     label: string;
     status: QueueStatus;
-    error?: string;
-    sourceId?: string;
+    error?: string | undefined;
+    sourceId?: string | undefined;
 };
 type FileQueueItem = QueueBase & { kind: "file"; file: File };
 type AudioQueueItem = QueueBase & { kind: "audio"; file: File };

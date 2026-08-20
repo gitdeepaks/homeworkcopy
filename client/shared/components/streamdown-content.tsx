@@ -24,7 +24,9 @@ export function StreamdownContent({
             mode={mode}
             isAnimating={isAnimating}
             plugins={plugins}
-            className={className}
+            // Streamdown's props reject an explicit `undefined`, so an absent
+            // className is contributed as an absent key.
+            {...(className === undefined ? {} : { className })}
         >
             {content}
         </Streamdown>

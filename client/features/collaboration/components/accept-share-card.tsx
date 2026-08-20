@@ -27,7 +27,7 @@ type AcceptShareCardProps = {
  * the shared table rather than from whatever prose reached the client. Anything
  * unrecognized falls back to the server's own message rather than a raw error.
  */
-function rejectionMessage(error: unknown): string {
+function rejectionMessage(error: Error): string {
     if (!(error instanceof ApiError)) {
         return "Something went wrong. Try the link again in a moment.";
     }
@@ -66,7 +66,7 @@ export function AcceptShareCard({ kind, token }: AcceptShareCardProps) {
                 setState({ status: "accepted", result });
                 router.push(workspaceRoutes.detail(result.workspaceId));
             })
-            .catch((error: unknown) => {
+            .catch((error: Error) => {
                 setState({
                     status: "rejected",
                     message: rejectionMessage(error),

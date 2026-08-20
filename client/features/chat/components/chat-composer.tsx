@@ -10,18 +10,18 @@ import { Textarea } from "@/components/ui/textarea";
 
 type ChatComposerProps = {
     onSubmit: (text: string) => void;
-    disabled?: boolean;
-    isStreaming?: boolean;
+    disabled?: boolean | undefined;
+    isStreaming?: boolean | undefined;
     groundingMode: GroundingMode;
     onGroundingModeChange: (mode: GroundingMode) => void;
     selectedSourceCount: number;
-    selectionWarning?: string;
+    selectionWarning?: string | undefined;
     value: string;
     onValueChange: (value: string) => void;
     onStop: () => void;
     onSourceAction: () => void;
-    editing?: boolean;
-    onCancelEdit?: () => void;
+    editing?: boolean | undefined;
+    onCancelEdit?: (() => void) | undefined;
 };
 
 export function ChatComposer({

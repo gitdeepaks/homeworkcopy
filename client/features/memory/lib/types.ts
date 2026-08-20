@@ -1,9 +1,11 @@
+import type { JsonValue } from "@homeworkcopy/contracts";
+
 export type UserMemory = {
     id: string;
     memory: string;
     createdAt: string;
     updatedAt: string;
-    metadata?: Record<string, unknown> | null;
+    metadata?: Record<string, JsonValue> | null;
     categories?: string[];
     source: "manual" | "learned";
 };

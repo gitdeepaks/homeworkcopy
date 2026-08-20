@@ -115,7 +115,7 @@ export function NoteEditorDialog({
 
 type NoteEditorFormProps = {
     workspaceId: string;
-    noteId?: string;
+    noteId?: string | undefined;
     seed: NoteDraft;
     onCancel: () => void;
     onSaved: (noteId: string) => void;

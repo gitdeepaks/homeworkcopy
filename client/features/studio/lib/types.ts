@@ -29,8 +29,8 @@ export type StudioOutput = {
 
 export type CreateOutputInput = SourceSelection & {
     type: OutputType;
-    title?: string;
-    options?: OutputGenerationOptionsRequest;
+    title?: string | undefined;
+    options?: OutputGenerationOptionsRequest | undefined;
 };
 
 /** Whether an output is still working towards a result. */

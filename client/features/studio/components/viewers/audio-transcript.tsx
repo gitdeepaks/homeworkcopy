@@ -17,7 +17,7 @@ type AudioTranscriptProps = {
     startsMs: ReadonlyMap<string, number>;
     activeSegmentId: string | null;
     /** Absent while there is no audio to seek. */
-    onSeek?: (positionMs: number) => void;
+    onSeek?: ((positionMs: number) => void) | undefined;
 };
 
 /**

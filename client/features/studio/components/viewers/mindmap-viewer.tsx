@@ -186,15 +186,41 @@ function computeTreeLayout(root: TreeNode, collapsed: Set<string>) {
     return placements;
 }
 
-function MindMapFlowNode({ id, data, selected }: NodeProps) {
+/**
+ * What a canvas node carries.
+ *
+ * `Node` defaults its data to `Record<string, unknown>`, which turns every read
+ * in the renderer into a probe with a fallback. Naming the shape once here
+ * makes the renderer read declared properties, and makes the builder below fail
+ * to compile if it ever stops supplying one.
+ */
+type MindMapFlowNodeData = {
+    label: string;
+    hasChildren: boolean;
+    collapsed: boolean;
+    isRoot: boolean;
+    direction: 1 | -1;
+    hasLeftBranch: boolean;
+    hasRightBranch: boolean;
+};
+
+type MindMapFlowNode = Node<MindMapFlowNodeData, "mindmap">;
+
+function MindMapFlowNode({
+    id,
+    data,
+    selected,
+}: NodeProps<MindMapFlowNode>) {
     const actions = useContext(MindMapActionsContext);
-    const label = typeof data.label === "string" ? data.label : "Untitled";
-    const hasChildren = Boolean(data.hasChildren);
-    const collapsed = Boolean(data.collapsed);
-    const isRoot = Boolean(data.isRoot);
-    const hasLeftBranch = Boolean(data.hasLeftBranch);
-    const hasRightBranch = Boolean(data.hasRightBranch);
-    const direction = data.direction === -1 ? -1 : 1;
+    const {
+        label,
+        hasChildren,
+        collapsed,
+        isRoot,
+        hasLeftBranch,
+        hasRightBranch,
+        direction,
+    } = data;
 
     const handleClass = "size-1.5 border-border! bg-muted-foreground!";
 
@@ -294,7 +320,7 @@ const nodeTypes = {
 type MindMapCanvasProps = {
     nodes: MindMapNode[];
     edges: MindMapEdge[];
-    workspaceId?: string;
+    workspaceId?: string | undefined;
 };
 
 function MindMapCanvas({ nodes, edges, workspaceId }: MindMapCanvasProps) {
@@ -322,7 +348,7 @@ function MindMapCanvas({ nodes, edges, workspaceId }: MindMapCanvasProps) {
         [edges],
     );
 
-    const flowNodes: Node[] = useMemo(() => {
+    const flowNodes: MindMapFlowNode[] = useMemo(() => {
         if (!tree) {
             return [];
         }
@@ -342,7 +368,7 @@ function MindMapCanvas({ nodes, edges, workspaceId }: MindMapCanvasProps) {
             return [
                 {
                     id: node.id,
-                    type: "mindmap",
+                    type: "mindmap" as const,
                     draggable: false,
                     data: {
                         label: node.label,

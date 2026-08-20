@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
-import type { Workspace } from "../lib/types";
+import type { CreateWorkspaceInput, Workspace } from "../lib/types";
 
 const ICON_OPTIONS = ["📚", "📖", "📝", "🎓", "💡", "🔬", "🧠", "✨"];
 
@@ -22,11 +22,7 @@ type WorkspaceFormDialogProps = {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     workspace?: Workspace | null;
-    onSubmit: (values: {
-        title: string;
-        description?: string;
-        icon?: string;
-    }) => Promise<void>;
+    onSubmit: (values: CreateWorkspaceInput) => Promise<void>;
     isPending?: boolean;
 };
 

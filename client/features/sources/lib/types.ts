@@ -23,7 +23,7 @@ export type {
 };
 
 export type SourceFilters = {
-    q?: string;
-    type?: SourceType;
-    status?: SourceStatus;
+    q?: string | undefined;
+    type?: SourceType | undefined;
+    status?: SourceStatus | undefined;
 };

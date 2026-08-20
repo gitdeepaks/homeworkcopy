@@ -2,7 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { notebookSummarySchema } from "@homeworkcopy/contracts";
 import type { Workspace } from "./types";
 
-const apiUrl = process.env.API_URL ?? "http://localhost:8080";
+const apiUrl = process.env["API_URL"] ?? "http://localhost:8080";
 
 /**
  * Loads a notebook on the server, as the signed-in reader.

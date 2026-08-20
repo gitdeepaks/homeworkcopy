@@ -9,9 +9,9 @@ import { CitationMarker } from "./citation-marker";
 
 type ChatMessageBodyProps = {
     text: string;
-    citations?: ChatCitation[];
+    citations?: ChatCitation[] | undefined;
     workspaceId: string;
-    isAnimating?: boolean;
+    isAnimating?: boolean | undefined;
 };
 
 function injectCitationTags(text: string) {

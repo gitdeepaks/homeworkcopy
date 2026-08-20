@@ -52,6 +52,17 @@ export function getSourceChunks(workspaceId: string, sourceId: string) {
     );
 }
 
+/**
+ * The idempotency header, as a fragment to spread into a request.
+ *
+ * `fetch` distinguishes a header that is absent from one whose value is
+ * `undefined`, so a caller without a key has to contribute no key at all rather
+ * than contribute an undefined one.
+ */
+function idempotentRequest(key: string | undefined): Pick<RequestInit, "headers"> {
+    return key === undefined ? {} : { headers: { "Idempotency-Key": key } };
+}
+
 export function createSource(
     workspaceId: string,
     input: CreateSourceInput,
@@ -63,7 +74,7 @@ export function createSource(
         {
             method: "POST",
             body: JSON.stringify(input),
-            headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
+            ...idempotentRequest(idempotencyKey),
         },
     );
 }
@@ -79,7 +90,7 @@ export function importWebsiteSource(
         {
             method: "POST",
             body: JSON.stringify(input),
-            headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
+            ...idempotentRequest(idempotencyKey),
         },
     );
 }
@@ -95,7 +106,7 @@ export function importYoutubeSource(
         {
             method: "POST",
             body: JSON.stringify(input),
-            headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
+            ...idempotentRequest(idempotencyKey),
         },
     );
 }
@@ -117,7 +128,7 @@ async function uploadSourceFile(
         method: "POST",
         credentials: "include",
         body: formData,
-        headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
+        ...idempotentRequest(idempotencyKey),
     });
 
     const data = await response.json().catch(() => null);

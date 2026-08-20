@@ -5,6 +5,19 @@
     "allowJs": true,
     "skipLibCheck": true,
     "strict": true,
+    /* Bulletproofing beyond `strict`.
+       - noUncheckedIndexedAccess: an index read can miss, so it is optional.
+       - exactOptionalPropertyTypes: `{ a?: string }` does not silently accept
+         an explicit `undefined`, which is a different thing from absent.
+       - noPropertyAccessFromIndexSignature: dotted access is reserved for
+         properties that are actually declared.
+       - noImplicitOverride / noFallthroughCasesInSwitch: intent must be written
+         down rather than inferred from position. */
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
     "noEmit": true,
     "esModuleInterop": true,
     "module": "esnext",
