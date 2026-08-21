@@ -9,6 +9,16 @@
 # Three stages, so the shipped image carries no compiler, no dev dependency, and
 # no source. What reaches production is `dist`, the production dependency tree,
 # and the generated Prisma client.
+#
+# It also carries the Prisma CLI and `prisma.config.ts`, which is a deliberate
+# departure from `deploy/migrate.Dockerfile`'s separate migration image. Railway
+# has no way to order one service's deploy behind another's, and its only
+# run-exactly-once-before-the-new-container primitive is a pre-deploy command,
+# which executes inside *this* image. Keeping the ordering guarantee is worth
+# more than keeping the CLI out, so `prisma` is a production dependency here and
+# the pre-deploy command is `npm run migrate:deploy`.
+# On a platform that can order a job ahead of a rollout, use the migration image
+# instead and drop `prisma` back to a dev dependency.
 
 # ---------------------------------------------------------------------------
 # Dependencies
@@ -72,7 +82,17 @@ COPY --from=build /repo/packages /repo/packages
 COPY --from=build /repo/server/node_modules /repo/server/node_modules
 COPY --from=build /repo/server/dist /repo/server/dist
 COPY --from=build /repo/server/prisma /repo/server/prisma
+# The schema alone is not enough: the datasource URL and the migrations
+# directory are declared in the config file, not in `schema.prisma`.
+COPY --from=build /repo/server/prisma.config.ts /repo/server/prisma.config.ts
 COPY --from=build /repo/server/package.json /repo/server/package.json
+
+# Proves the migration entrypoint actually resolves in this image. Whether the
+# package manager hoists the CLI to the workspace root or leaves it beside the
+# server, `npm run` finds it on PATH — but a pruned or dangling bin would
+# otherwise not surface until the platform's pre-deploy step, which is far too
+# late and far harder to read. `--help` needs no database.
+RUN npm run migrate:deploy -- --help > /dev/null
 
 # Never root. The image installs nothing at runtime, so it does not need to be.
 USER node

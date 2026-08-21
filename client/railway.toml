@@ -1,0 +1,27 @@
+# Railway configuration for the **web** service.
+#
+# Not picked up automatically: Railway looks for `railway.toml` at the repository
+# root, and that file belongs to `api`. This one is selected explicitly in
+# Settings → Config-as-code file path as `/client/railway.toml`.
+#
+# Paths below are still relative to the repository root, not to `client/`. The
+# config file path does not move the build context, and `client/Dockerfile`
+# needs the root anyway — it copies `bun.lock` and `packages/contracts`.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "client/Dockerfile"
+watchPatterns = [
+    "client/**",
+    "packages/**",
+    "package.json",
+    "bun.lock",
+]
+
+[deploy]
+# Next has no dedicated health route; the home page is the cheapest thing that
+# proves the server rendered rather than merely bound a port.
+healthcheckPath = "/"
+healthcheckTimeout = 300
+
+restartPolicyType = "ON_FAILURE"

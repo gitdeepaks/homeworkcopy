@@ -1,0 +1,39 @@
+# Railway configuration for the **api** service.
+#
+# Railway reads `railway.toml` from the repository root by default, and this
+# repository's root is the build context both images need — `server/Dockerfile`
+# copies `bun.lock` and `packages/contracts`, so a service whose root directory
+# is `server/` cannot build it. Neither service therefore sets a root directory,
+# which means they would both pick up this file. The `web` service is pointed at
+# `client/railway.toml` instead, via Settings → Config-as-code file path.
+#
+# So: this file configures `api`, `client/railway.toml` configures `web`, and a
+# third service added later inherits this one until it is pointed elsewhere.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "server/Dockerfile"
+# Which changes justify rebuilding the API. The client is deliberately absent.
+watchPatterns = [
+    "server/**",
+    "packages/**",
+    "package.json",
+    "bun.lock",
+    "railway.toml",
+]
+
+[deploy]
+# Migrations run here rather than in `deploy/migrate.Dockerfile` because a
+# pre-deploy command is the only ordering primitive Railway has: it runs exactly
+# once, to completion, before any new container serves traffic, and a non-zero
+# exit fails the deploy instead of leaving the API on a schema it does not match.
+# See the header comment in `server/Dockerfile` for why the CLI is in that image.
+preDeployCommand = ["npm run migrate:deploy"]
+
+# Readiness, not liveness. An instance is only sent traffic once it can reach the
+# database — which is exactly what `/health/ready` reports and `/health/live`
+# deliberately does not.
+healthcheckPath = "/health/ready"
+healthcheckTimeout = 300
+
+restartPolicyType = "ON_FAILURE"
