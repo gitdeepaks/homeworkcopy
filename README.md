@@ -8,6 +8,16 @@ conversation.
 The repository is a Bun workspace: a Next.js client, a standalone Express API,
 and a shared contracts package.
 
+| | |
+| --- | --- |
+| **App** | https://web-production-11d802.up.railway.app |
+| **API** | https://api-production-1cad.up.railway.app |
+
+The API is public because two external services call it directly — Clerk posts
+identity webhooks to `/api/webhooks/clerk` and Inngest invokes jobs at
+`/api/inngest`. The browser never uses it: the client reaches the API over the
+private network and serves everything from its own origin (§3).
+
 ---
 
 ## 1. The problem
@@ -338,6 +348,17 @@ it has two replicas.
 
 Rehearse the stack locally with `cp deploy/.env.staging.example .env && docker
 compose up --build` (add `--profile local-jobs` to run background jobs too).
+
+The deployment linked at the top of this file runs on Railway as two services,
+built from `server/Dockerfile` and `client/Dockerfile` and configured by
+`railway.toml` and `client/railway.toml`. Railway cannot order one service's
+rollout behind another's, and its only run-exactly-once-before-the-new-container
+primitive is a pre-deploy command — which executes inside the API image. So
+migrations run there as the API's pre-deploy step rather than from
+`deploy/migrate.Dockerfile`, which is why `prisma` is a production dependency of
+the server and the CLI ships in that image. The ordering guarantee is worth more
+than keeping the CLI out; on a platform that can order a job ahead of a rollout,
+use the migration image and drop `prisma` back to a dev dependency.
 
 Probes answer three different questions and must be wired to three different
 things: `/health/live` for restarts, `/health/ready` for load-balancer rotation,
