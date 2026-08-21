@@ -1,11 +1,16 @@
 import { sourceTypeSchema, type GroundingMode, type SourceType } from "@homeworkcopy/contracts";
 import type { UIMessage } from "ai";
 import { z } from "zod";
-import { RAG_MIN_SCORE, RAG_TOP_K } from "../ai-config.js";
+import {
+    RAG_CROSS_LINGUAL_TRIGGER_SCORE,
+    RAG_TOP_K,
+    RAG_VECTOR_SCORE_FLOOR,
+} from "../ai-config.js";
 import { embedTexts } from "../openai.js";
 import { queryWorkspaceVectors } from "../pinecone.js";
 import { searchReadyChunksByKeyword } from "../../repositories/source-chunk.repository.js";
 import { getTextFromUIMessage } from "../../utils/chat-message.js";
+import { translateQueryForSources } from "./query-translation.js";
 
 const CANDIDATE_LIMIT = RAG_TOP_K * 3;
 const MAX_CHUNKS_PER_SOURCE = 2;
@@ -49,7 +54,15 @@ export type RetrievalDiagnostics = {
     keywordCandidates: number;
     mergedCandidates: number;
     returnedChunks: number;
+    /** Top RRF rank score — comparable between queries, not a similarity. */
     highestScore: number | null;
+    /** Top cosine score after any retry, for tuning the floor and trigger. */
+    highestVectorScore: number | null;
+    /** Top cosine score before any retry, so the retry's effect is visible. */
+    firstPassVectorScore: number | null;
+    /** Passes run, including the original question. `1` means no retry. */
+    queryVariants: number;
+    crossLingualRetry: boolean;
     latencyMs: number;
     noContext: boolean;
 };
@@ -151,37 +164,61 @@ export function rerankHybridCandidates(
     return { chunks: selected, mergedCandidateCount: merged.size };
 }
 
-export async function retrieveWorkspaceContext(input: {
-    workspaceId: string;
-    sourceIds: string[];
-    query: string;
-}): Promise<RetrievalResult> {
-    const startedAt = performance.now();
-    const [embedding] = await embedTexts([input.query]);
-    if (!embedding) {
-        throw new Error("Embedding provider returned no query vector");
+/** One question embedded and searched against the selected sources. */
+type RetrievalPass = {
+    vectorChunks: RetrievedChunk[];
+    keywordChunks: RetrievedChunk[];
+};
+
+/**
+ * Keeps the best-scoring copy of each chunk across passes.
+ *
+ * The same chunk is expected to surface under several query variants; ranking it
+ * once by its strongest score keeps the RRF input honest, since a chunk found
+ * twice should not out-rank one found once purely by appearing twice.
+ */
+function mergeByBestScore(chunkGroups: RetrievedChunk[][]): RetrievedChunk[] {
+    const best = new Map<string, RetrievedChunk>();
+
+    for (const chunks of chunkGroups) {
+        for (const chunk of chunks) {
+            const existing = best.get(chunk.chunkId);
+            if (!existing || chunk.score > existing.score) {
+                best.set(chunk.chunkId, chunk);
+            }
+        }
     }
+
+    return [...best.values()].sort((left, right) => right.score - left.score);
+}
+
+/**
+ * Runs one question through both retrievers.
+ *
+ * @param workspaceId - Workspace whose vectors and chunks may be searched
+ * @param sourceIds - The reader's selected sources
+ * @param query - A single question or restatement of one
+ * @param embedding - The query's vector, embedded by the caller so that all
+ * variants of a question cost one embedding round-trip rather than one each
+ */
+async function runRetrievalPass(
+    workspaceId: string,
+    sourceIds: string[],
+    query: string,
+    embedding: number[],
+): Promise<RetrievalPass> {
     const [vectorMatches, keywordMatches] = await Promise.all([
-        queryWorkspaceVectors(
-            input.workspaceId,
-            embedding,
-            CANDIDATE_LIMIT,
-            input.sourceIds,
-        ),
-        searchReadyChunksByKeyword(
-            input.workspaceId,
-            input.sourceIds,
-            input.query,
-            CANDIDATE_LIMIT,
-        ),
+        queryWorkspaceVectors(workspaceId, embedding, CANDIDATE_LIMIT, sourceIds),
+        searchReadyChunksByKeyword(workspaceId, sourceIds, query, CANDIDATE_LIMIT),
     ]);
 
     const vectorChunks: RetrievedChunk[] = [];
     for (const match of vectorMatches) {
         const score = match.score ?? 0;
-        if (score < RAG_MIN_SCORE) continue;
+        // A floor, not a relevance test — see RAG_VECTOR_SCORE_FLOOR.
+        if (score < RAG_VECTOR_SCORE_FLOOR) continue;
         const metadata = vectorMetadataSchema.safeParse(match.metadata);
-        if (!metadata.success || !input.sourceIds.includes(metadata.data.sourceId)) continue;
+        if (!metadata.success || !sourceIds.includes(metadata.data.sourceId)) continue;
         vectorChunks.push({
             ...metadata.data,
             score,
@@ -200,8 +237,68 @@ export async function retrieveWorkspaceContext(input: {
             },
         ];
     });
+
+    return { vectorChunks, keywordChunks };
+}
+
+/**
+ * Retrieves the notebook evidence for one question.
+ *
+ * Runs the hybrid vector + keyword search, and when the vector half comes back
+ * weak enough to suggest the question and the sources are in different languages,
+ * retries with the question translated into the sources' language and merges
+ * both attempts. Final selection is by rank, never by absolute cosine score.
+ *
+ * @param input.workspaceId - Workspace to search
+ * @param input.sourceIds - The reader's selected sources
+ * @param input.query - The question, already rewritten for follow-up context
+ * @returns The chosen chunks plus diagnostics describing how they were found
+ * @throws When the embedding provider returns no vector for the question
+ */
+export async function retrieveWorkspaceContext(input: {
+    workspaceId: string;
+    sourceIds: string[];
+    query: string;
+}): Promise<RetrievalResult> {
+    const startedAt = performance.now();
+    const [embedding] = await embedTexts([input.query]);
+    if (!embedding) {
+        throw new Error("Embedding provider returned no query vector");
+    }
+
+    const firstPass = await runRetrievalPass(
+        input.workspaceId,
+        input.sourceIds,
+        input.query,
+        embedding,
+    );
+
+    const passes: RetrievalPass[] = [firstPass];
+    const bestVectorScore = firstPass.vectorChunks[0]?.score ?? null;
+    const translations = await translateWhenPassIsWeak(input.query, firstPass);
+
+    if (translations.length > 0) {
+        const embeddings = await embedTexts(translations);
+        const retries = await Promise.all(
+            translations.flatMap((translation, index) => {
+                const translationEmbedding = embeddings[index];
+                if (!translationEmbedding) return [];
+                return [
+                    runRetrievalPass(
+                        input.workspaceId,
+                        input.sourceIds,
+                        translation,
+                        translationEmbedding,
+                    ),
+                ];
+            }),
+        );
+        passes.push(...retries);
+    }
+
+    const vectorChunks = mergeByBestScore(passes.map((pass) => pass.vectorChunks));
+    const keywordChunks = mergeByBestScore(passes.map((pass) => pass.keywordChunks));
     const reranked = rerankHybridCandidates(vectorChunks, keywordChunks);
-    const highestScore = reranked.chunks[0]?.score ?? null;
 
     return {
         chunks: reranked.chunks,
@@ -212,11 +309,36 @@ export async function retrieveWorkspaceContext(input: {
             keywordCandidates: keywordChunks.length,
             mergedCandidates: reranked.mergedCandidateCount,
             returnedChunks: reranked.chunks.length,
-            highestScore,
+            highestScore: reranked.chunks[0]?.score ?? null,
+            highestVectorScore: vectorChunks[0]?.score ?? null,
+            firstPassVectorScore: bestVectorScore,
+            queryVariants: passes.length,
+            crossLingualRetry: translations.length > 0,
             latencyMs: Math.round(performance.now() - startedAt),
             noContext: reranked.chunks.length === 0,
         },
     };
+}
+
+/**
+ * Decides whether a weak first pass is worth one translation round-trip.
+ *
+ * The language sample comes from the candidates the first pass already returned,
+ * so identifying the sources' language costs no extra database or vector call.
+ * With nothing retrieved at all there is nothing to translate *towards*, and the
+ * retry is skipped rather than guessed at.
+ */
+async function translateWhenPassIsWeak(
+    query: string,
+    pass: RetrievalPass,
+): Promise<string[]> {
+    const bestScore = pass.vectorChunks[0]?.score ?? 0;
+    if (bestScore >= RAG_CROSS_LINGUAL_TRIGGER_SCORE) return [];
+
+    const sampleText = pass.vectorChunks[0]?.text ?? pass.keywordChunks[0]?.text;
+    if (sampleText === undefined) return [];
+
+    return translateQueryForSources({ query, sampleText });
 }
 
 export type UserMemoryContext = string;
